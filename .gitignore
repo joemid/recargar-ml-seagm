@@ -1,0 +1,6 @@
+node_modules/
+cookies_seagm.json
+cookies.json
+*.log
+.DS_Store
+.env
