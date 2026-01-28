@@ -349,26 +349,72 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // Cerrar cualquier popup/overlay primero
         await cerrarPopups();
-        await sleep(500);
         
         // Scroll al botón
         await page.evaluate(() => {
             const btn = document.querySelector('#ua-buyNowButton');
-            if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (btn) btn.scrollIntoView({ block: 'center' });
         });
         await sleep(500);
         
-        // Click con evaluate (funciona en Railway)
+        // MÉTODO 1: mousedown + mouseup + click (simula click real)
+        log('👆', 'Intento 1: mousedown/mouseup/click...');
         await page.evaluate(() => {
-            const buyBtn = document.querySelector('#ua-buyNowButton');
-            if (buyBtn) buyBtn.click();
+            const btn = document.querySelector('#ua-buyNowButton');
+            if (btn) {
+                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            }
         });
+        await sleep(3000);
         
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
-        await sleep(2000);
+        if (page.url().includes('mobile-legends-diamonds-top-up')) {
+            // MÉTODO 2: form submit directo
+            log('👆', 'Intento 2: form.submit...');
+            await page.evaluate(() => {
+                const form = document.querySelector('form');
+                if (form) form.submit();
+            });
+            await sleep(3000);
+        }
+        
+        if (page.url().includes('mobile-legends-diamonds-top-up')) {
+            // MÉTODO 3: requestSubmit (más moderno)
+            log('👆', 'Intento 3: requestSubmit...');
+            await page.evaluate(() => {
+                const form = document.querySelector('form');
+                const btn = document.querySelector('#ua-buyNowButton');
+                if (form && form.requestSubmit) {
+                    form.requestSubmit(btn);
+                } else if (form) {
+                    form.submit();
+                }
+            });
+            await sleep(3000);
+        }
+        
+        if (page.url().includes('mobile-legends-diamonds-top-up')) {
+            // MÉTODO 4: Puppeteer click nativo
+            log('👆', 'Intento 4: page.$eval click...');
+            try {
+                await page.$eval('#ua-buyNowButton', btn => btn.click());
+            } catch(e) {
+                log('⚠️', e.message);
+            }
+            await sleep(3000);
+        }
+        
+        if (page.url().includes('mobile-legends-diamonds-top-up')) {
+            // MÉTODO 5: Enter en el form
+            log('👆', 'Intento 5: Enter...');
+            await page.focus('#ua-buyNowButton');
+            await page.keyboard.press('Enter');
+            await sleep(3000);
+        }
         
         const currentUrl = page.url();
-        log('🔗', `URL: ${currentUrl}`);
+        log('🔗', `URL final: ${currentUrl}`);
         
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
             log('⚠️', 'No se llegó al checkout, URL actual:', currentUrl);
