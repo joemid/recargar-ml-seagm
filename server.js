@@ -153,60 +153,92 @@ async function hacerLogin() {
     if (!page) return false;
     try {
         log('🔐', 'Iniciando login en SEAGM...');
-        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
-        await sleep(2000);
+        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
         
-        // Cerrar Cookiebot si aparece
+        // ========== CERRAR COOKIEBOT PRIMERO ==========
         try {
-            const cookieBtn = await page.$('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-            if (cookieBtn) {
-                await cookieBtn.click();
-                log('🍪', 'Cookiebot cerrado');
-                await sleep(500);
-            }
-        } catch (e) {}
+            await page.waitForSelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll', { timeout: 5000 });
+            await page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
+            log('🍪', 'Cookiebot cerrado');
+            await sleep(500);
+        } catch (e) {
+            await page.evaluate(() => {
+                const btn = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
+                if (btn) btn.click();
+            });
+        }
         
-        await cerrarPopups();
-        
-        const currentUrl = page.url();
-        if (!currentUrl.includes('/sso/login')) {
+        // Ya logueado?
+        if (!page.url().includes('/sso/login')) {
             log('✅', 'Ya estaba logueado');
             sesionActiva = true;
             await guardarCookies();
             return true;
         }
         
-        const emailTab = await page.$('input[type="radio"][value="email"]');
-        if (emailTab) { await emailTab.click(); await sleep(300); }
-        
+        // ========== LLENAR FORMULARIO ==========
+        log('📧', 'Llenando formulario...');
         await page.waitForSelector('#login_email', { timeout: 10000 });
-        await page.click('#login_email', { clickCount: 3 });
-        await page.type('#login_email', CONFIG.EMAIL, { delay: 30 });
-        await sleep(CONFIG.DELAY_RAPIDO);
         
-        await page.click('#login_pass', { clickCount: 3 });
-        await page.type('#login_pass', CONFIG.PASSWORD, { delay: 30 });
-        await sleep(CONFIG.DELAY_RAPIDO);
+        const loginResult = await page.evaluate((email, password) => {
+            const emailRadio = document.querySelector('input[value="email"]');
+            if (emailRadio) emailRadio.click();
+            
+            const emailInput = document.querySelector('#login_email');
+            const passInput = document.querySelector('#login_pass');
+            if (!emailInput || !passInput) return { error: 'Campos no encontrados' };
+            
+            emailInput.value = email;
+            passInput.value = password;
+            emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+            passInput.dispatchEvent(new Event('input', { bubbles: true }));
+            
+            const submitBtn = document.querySelector('#login_btw input[type="submit"]');
+            if (submitBtn) { submitBtn.click(); return { success: true }; }
+            return { error: 'No se pudo enviar' };
+        }, CONFIG.EMAIL, CONFIG.PASSWORD);
         
-        await page.evaluate(() => {
-            const btn = document.querySelector('#login_btw input[type="submit"]');
-            if (btn) btn.click();
+        if (loginResult.error) {
+            log('❌', loginResult.error);
+            return false;
+        }
+        
+        log('🚀', 'Login enviado');
+        await sleep(4000);
+        
+        // Verificar error
+        const error = await page.evaluate(() => {
+            const alert = document.querySelector('#email_login_alert');
+            return alert?.textContent?.trim() || null;
         });
         
-        await sleep(5000);
+        if (error) {
+            log('❌', `Error: ${error}`);
+            return false;
+        }
         
-        const newUrl = page.url();
-        if (!newUrl.includes('/sso/login')) {
+        // Verificar éxito
+        if (!page.url().includes('/sso/login')) {
             log('✅', 'Login exitoso!');
             sesionActiva = true;
             await guardarCookies();
             return true;
         }
         
+        // Verificar en página de ML
+        await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
+        await sleep(1500);
+        
+        const logueado = await verificarSesion();
+        if (logueado) {
+            log('✅', 'Login verificado!');
+            return true;
+        }
+        
         log('❌', 'Login falló');
         return false;
     } catch (e) {
-        log('❌', `Error en login: ${e.message}`);
+        log('❌', `Error: ${e.message}`);
         return false;
     }
 }
@@ -248,12 +280,7 @@ async function initBrowser() {
         await guardarCookies();
     } else {
         const loginOk = await hacerLogin();
-        if (loginOk) {
-            log('✅', 'Login automático exitoso');
-            await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
-            await sleep(1500);
-            await cerrarPopups();
-        } else {
+        if (!loginOk) {
             log('⚠️', '═'.repeat(45));
             log('⚠️', 'NO SE PUDO INICIAR SESIÓN');
             log('⚠️', 'Usa POST /cargar-cookies para subir cookies');
@@ -309,12 +336,13 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await sleep(CONFIG.DELAY_MEDIO);
         
         // ========== PASO 3: Ingresar User ID ==========
+        // CAMBIO: Ahora usa userName en vez de input1
         log('3️⃣', 'Ingresando User ID...');
         
-        // Esperar a que cargue el campo
-        await page.waitForSelector('input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
+        await page.waitForSelector('input[name="userName"], input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
         
-        const userInput = await page.$('input[name="input1"]') || 
+        const userInput = await page.$('input[name="userName"]') || 
+                          await page.$('input[name="input1"]') ||
                           await page.$('input[placeholder="Please enter User ID"]');
         if (!userInput) {
             return { success: false, error: 'No se encontró el campo de User ID' };
@@ -324,8 +352,10 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await sleep(CONFIG.DELAY_MEDIO);
         
         // ========== PASO 4: Ingresar Zone ID ==========
+        // CAMBIO: Ahora usa serverId en vez de input2
         log('4️⃣', 'Ingresando Zone ID...');
-        const zoneInput = await page.$('input[name="input2"]') ||
+        const zoneInput = await page.$('input[name="serverId"]') ||
+                          await page.$('input[name="input2"]') ||
                           await page.$('input[placeholder="Please enter Zone ID"]');
         if (!zoneInput) {
             return { success: false, error: 'No se encontró el campo de Zone ID' };
