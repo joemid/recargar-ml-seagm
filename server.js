@@ -309,8 +309,17 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
             const zoneInput = document.querySelector('input[name="input2"]') ||
                               document.querySelector('input[placeholder="Please enter Zone ID"]');
             
+            // DEBUG: mostrar qué encontró
+            const debug = {
+                userFound: !!userInput,
+                zoneFound: !!zoneInput,
+                userSelector: userInput ? (userInput.name || userInput.placeholder) : null,
+                zoneSelector: zoneInput ? (zoneInput.name || zoneInput.placeholder) : null,
+                allInputs: Array.from(document.querySelectorAll('input')).map(i => i.name || i.placeholder || i.type).slice(0, 10)
+            };
+            
             if (!userInput || !zoneInput) {
-                return { error: 'Campos no encontrados' };
+                return { error: 'Campos no encontrados', debug };
             }
             
             userInput.value = userId;
@@ -321,8 +330,10 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
             zoneInput.dispatchEvent(new Event('input', { bubbles: true }));
             zoneInput.dispatchEvent(new Event('change', { bubbles: true }));
             
-            return { success: true, user: userInput.value, zone: zoneInput.value };
+            return { success: true, user: userInput.value, zone: zoneInput.value, debug };
         }, userId, zoneId);
+        
+        log('🔍', `DEBUG campos: ${JSON.stringify(fillResult.debug || {})}`);
         
         if (fillResult.error) {
             return { success: false, error: fillResult.error };
@@ -350,10 +361,34 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 5: Click en "Compra ahora" ==========
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
-        await page.evaluate(() => {
-            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
-            if (buyBtn) buyBtn.click();
+        // DEBUG: ver qué botón encuentra
+        const buyBtnDebug = await page.evaluate(() => {
+            const btn1 = document.querySelector('#buyNowButton input[type="submit"]');
+            const btn2 = document.querySelector('#ua-buyNowButton');
+            const btn3 = document.querySelector('.buy-now-btn');
+            const btn4 = document.querySelector('input[value*="COMPRA"]');
+            return {
+                buyNowButton: !!btn1,
+                uaBuyNow: !!btn2,
+                buyNowBtn: !!btn3,
+                inputCompra: !!btn4,
+                btn1Text: btn1?.value || btn1?.textContent,
+                btn2Text: btn2?.value || btn2?.textContent
+            };
         });
+        log('🔍', `DEBUG botones compra: ${JSON.stringify(buyBtnDebug)}`);
+        
+        const clickResult = await page.evaluate(() => {
+            const buyBtn = document.querySelector('#buyNowButton input[type="submit"]') || 
+                           document.querySelector('#ua-buyNowButton') ||
+                           document.querySelector('input[value*="COMPRA"]');
+            if (buyBtn) { 
+                buyBtn.click(); 
+                return { clicked: true, selector: buyBtn.id || buyBtn.className || buyBtn.value };
+            }
+            return { clicked: false };
+        });
+        log('🔍', `Click result: ${JSON.stringify(clickResult)}`);
         
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
@@ -361,16 +396,36 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // Verificar checkout
         const currentUrl = page.url();
+        log('🔗', `URL después de click: ${currentUrl}`);
+        
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
-            return { success: false, error: 'No se pudo llegar al checkout' };
+            log('❌', 'No llegó a checkout');
+            return { success: false, error: 'No se pudo llegar al checkout', url: currentUrl };
         }
         log('✅', 'En página de checkout');
         
         // ========== PASO 6: Click en "Pagar Ahora" ==========
         log('6️⃣', 'Haciendo click en Pagar Ahora...');
         
+        // DEBUG: ver qué botón encuentra
+        const payBtnDebug = await page.evaluate(() => {
+            const btn1 = document.querySelector('a.payNowButton');
+            const btn2 = document.querySelector('.payNowButton');
+            const btn3 = document.querySelector('#ua-checkoutOrderButton');
+            return {
+                aPayNow: !!btn1,
+                payNowButton: !!btn2,
+                uaCheckout: !!btn3,
+                btn1Text: btn1?.textContent?.trim(),
+                btn2Text: btn2?.textContent?.trim()
+            };
+        });
+        log('🔍', `DEBUG botones pagar: ${JSON.stringify(payBtnDebug)}`);
+        
         await page.evaluate(() => {
-            const payBtn = document.querySelector('a.payNowButton, .payNowButton, #ua-checkoutOrderButton, input[type="submit"][value*="Pagar"]');
+            const payBtn = document.querySelector('a.payNowButton') || 
+                           document.querySelector('.payNowButton') || 
+                           document.querySelector('#ua-checkoutOrderButton');
             if (payBtn) payBtn.click();
         });
         
@@ -380,8 +435,11 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // Verificar página de pago
         const payUrl = page.url();
+        log('🔗', `URL página pago: ${payUrl}`);
+        
         if (!payUrl.includes('pay.seagm.com')) {
-            return { success: false, error: 'No se pudo llegar a la página de pago' };
+            log('❌', 'No llegó a página de pago');
+            return { success: false, error: 'No se pudo llegar a la página de pago', url: payUrl };
         }
         log('✅', 'En página de selección de pago');
         await cerrarPopups();
@@ -395,15 +453,16 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
             for (const ch of channels) {
                 if (ch.textContent.includes('SEAGM Balance') || ch.textContent.includes('SEAGM Saldo')) {
                     ch.click();
-                    return true;
+                    return { selected: true, text: ch.textContent.substring(0, 30) };
                 }
             }
             const radioBalance = document.querySelector('input[value*="balance"], input[name="channel"][value="16"]');
-            if (radioBalance) { radioBalance.click(); return true; }
-            return false;
+            if (radioBalance) { radioBalance.click(); return { selected: true, via: 'radio' }; }
+            return { selected: false, channelsFound: channels.length };
         });
+        log('🔍', `DEBUG balance: ${JSON.stringify(balanceSeleccionado)}`);
         
-        if (!balanceSeleccionado) {
+        if (!balanceSeleccionado.selected) {
             return { success: false, error: 'No se pudo seleccionar SEAGM Balance' };
         }
         await sleep(CONFIG.DELAY_MEDIO);
