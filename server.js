@@ -279,44 +279,23 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await sleep(CONFIG.DELAY_MEDIO);
         
         // ========== DIFERENCIA CON BS: DOS CAMPOS ==========
-        log('3️⃣', 'Ingresando User ID y Zone ID...');
+        log('3️⃣', 'Ingresando User ID...');
         
-        // LLENAR CON EVALUATE (igual que login que SÍ funciona)
-        const camposResult = await page.evaluate((userId, zoneId) => {
-            const userInput = document.querySelector('input[name="userName"]') || document.querySelector('input[name="input1"]');
-            const zoneInput = document.querySelector('input[name="serverId"]') || document.querySelector('input[name="input2"]');
-            
-            if (!userInput) return { error: 'No se encontró campo User ID' };
-            if (!zoneInput) return { error: 'No se encontró campo Zone ID' };
-            
-            // Limpiar y llenar User ID
-            userInput.focus();
-            userInput.value = '';
-            userInput.value = userId;
-            userInput.dispatchEvent(new Event('input', { bubbles: true }));
-            userInput.dispatchEvent(new Event('change', { bubbles: true }));
-            userInput.dispatchEvent(new Event('blur', { bubbles: true }));
-            
-            // Limpiar y llenar Zone ID  
-            zoneInput.focus();
-            zoneInput.value = '';
-            zoneInput.value = zoneId;
-            zoneInput.dispatchEvent(new Event('input', { bubbles: true }));
-            zoneInput.dispatchEvent(new Event('change', { bubbles: true }));
-            zoneInput.dispatchEvent(new Event('blur', { bubbles: true }));
-            
-            return { 
-                success: true, 
-                userValue: userInput.value, 
-                zoneValue: zoneInput.value 
-            };
-        }, userId, zoneId);
+        // Click en campo User ID y escribir con keyboard
+        await page.click('input[name="userName"]');
+        await page.keyboard.type(userId, { delay: 50 });
+        log('✅', `User ID escrito: ${userId}`);
         
-        if (camposResult.error) {
-            return { success: false, error: camposResult.error };
-        }
-        log('✅', `Campos: User="${camposResult.userValue}" Zone="${camposResult.zoneValue}"`);
+        // Tab para ir al siguiente campo
+        await page.keyboard.press('Tab');
+        await sleep(500);
         
+        log('4️⃣', 'Ingresando Zone ID...');
+        await page.keyboard.type(zoneId, { delay: 50 });
+        log('✅', `Zone ID escrito: ${zoneId}`);
+        
+        // Tab para salir del campo (trigger validación)
+        await page.keyboard.press('Tab');
         await sleep(1500);
         // ========== FIN DIFERENCIA ==========
         
@@ -338,25 +317,16 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
-        // URL ANTES
-        const urlAntes = page.url();
-        log('🔗', `URL ANTES: ${urlAntes}`);
-        
-        // CLICK CON EVALUATE (igual que BS)
-        await page.evaluate(() => {
-            const btn = document.querySelector('#ua-buyNowButton');
-            if (btn) btn.click();
-        });
+        // Click directo en el botón submit
+        await page.click('input#ua-buyNowButton');
         log('👆', 'Click ejecutado');
         
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
         
-        // URL DESPUÉS
-        const urlDespues = page.url();
-        log('🔗', `URL DESPUÉS: ${urlDespues}`);
-        
         const currentUrl = page.url();
+        log('🔗', `URL: ${currentUrl}`);
+        
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
             log('⚠️', 'No se llegó al checkout, URL actual:', currentUrl);
             return { success: false, error: 'No se pudo llegar al checkout' };
