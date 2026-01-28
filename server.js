@@ -151,77 +151,52 @@ async function verificarSesion() {
 
 async function hacerLogin() {
     if (!page) return false;
-    
     try {
         log('🔐', 'Iniciando login en SEAGM...');
+        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
+        await sleep(2000);
         
-        // Ir a página de login
-        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        
-        // ========== CERRAR COOKIEBOT RÁPIDO ==========
+        // Cerrar Cookiebot si aparece
         try {
-            await page.waitForSelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll', { timeout: 5000 });
-            await page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-            log('🍪', 'Cookiebot cerrado');
-            await sleep(500);
-        } catch (e) {
-            await page.evaluate(() => {
-                const btn = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-                if (btn) btn.click();
-            });
-        }
+            const cookieBtn = await page.$('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
+            if (cookieBtn) {
+                await cookieBtn.click();
+                log('🍪', 'Cookiebot cerrado');
+                await sleep(500);
+            }
+        } catch (e) {}
         
-        // Verificar si ya está logueado
-        if (!page.url().includes('/sso/login')) {
+        await cerrarPopups();
+        
+        const currentUrl = page.url();
+        if (!currentUrl.includes('/sso/login')) {
             log('✅', 'Ya estaba logueado');
             sesionActiva = true;
             await guardarCookies();
             return true;
         }
         
-        // ========== LLENAR Y ENVIAR FORMULARIO ==========
-        log('📧', 'Llenando formulario...');
+        const emailTab = await page.$('input[type="radio"][value="email"]');
+        if (emailTab) { await emailTab.click(); await sleep(300); }
         
         await page.waitForSelector('#login_email', { timeout: 10000 });
+        await page.click('#login_email', { clickCount: 3 });
+        await page.type('#login_email', CONFIG.EMAIL, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        const loginResult = await page.evaluate((email, password) => {
-            const emailRadio = document.querySelector('input[value="email"]');
-            if (emailRadio) emailRadio.click();
-            
-            const emailInput = document.querySelector('#login_email');
-            const passInput = document.querySelector('#login_pass');
-            if (!emailInput || !passInput) return { error: 'Campos no encontrados' };
-            
-            emailInput.value = email;
-            passInput.value = password;
-            emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-            passInput.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            const submitBtn = document.querySelector('#login_btw input[type="submit"]');
-            if (submitBtn) {
-                submitBtn.click();
-                return { success: true, method: 'submit-btn' };
-            }
-            
-            const form = document.querySelector('#sso_form');
-            if (form) {
-                form.submit();
-                return { success: true, method: 'form-submit' };
-            }
-            
-            return { error: 'No se pudo enviar' };
-        }, CONFIG.EMAIL, CONFIG.PASSWORD);
+        await page.click('#login_pass', { clickCount: 3 });
+        await page.type('#login_pass', CONFIG.PASSWORD, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        if (loginResult.error) {
-            log('❌', loginResult.error);
-            return false;
-        }
+        await page.evaluate(() => {
+            const btn = document.querySelector('#login_btw input[type="submit"]');
+            if (btn) btn.click();
+        });
         
-        log('🚀', `Login enviado (${loginResult.method})`);
+        await sleep(5000);
         
-        await sleep(4000);
-        
-        if (!page.url().includes('/sso/login')) {
+        const newUrl = page.url();
+        if (!newUrl.includes('/sso/login')) {
             log('✅', 'Login exitoso!');
             sesionActiva = true;
             await guardarCookies();
@@ -230,9 +205,8 @@ async function hacerLogin() {
         
         log('❌', 'Login falló');
         return false;
-        
     } catch (e) {
-        log('❌', `Error: ${e.message}`);
+        log('❌', `Error en login: ${e.message}`);
         return false;
     }
 }
@@ -276,7 +250,6 @@ async function initBrowser() {
         const loginOk = await hacerLogin();
         if (loginOk) {
             log('✅', 'Login automático exitoso');
-            log('🌐', 'Navegando a Mobile Legends...');
             await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
             await sleep(1500);
             await cerrarPopups();
@@ -324,26 +297,24 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         const paqueteSeleccionado = await page.evaluate((sku) => {
             const radio = document.querySelector(`input[name="topupType"][value="${sku}"]`);
-            if (radio) { radio.click(); return 'radio'; }
+            if (radio) { radio.click(); return true; }
             const skuDiv = document.querySelector(`.SKU_type[data-sku="${sku}"]`);
-            if (skuDiv) { skuDiv.click(); return 'skuDiv'; }
+            if (skuDiv) { skuDiv.click(); return true; }
             return false;
         }, paquete.sku);
         
         if (!paqueteSeleccionado) {
             return { success: false, error: `No se pudo seleccionar el paquete ${paquete.nombre}` };
         }
-        log('📍', `Paquete seleccionado via: ${paqueteSeleccionado}`);
         await sleep(CONFIG.DELAY_MEDIO);
         
         // ========== PASO 3: Ingresar User ID ==========
         log('3️⃣', 'Ingresando User ID...');
         
         // Esperar a que cargue el campo
-        await page.waitForSelector('input[name="userName"], input[name="input1"]', { timeout: 10000 });
+        await page.waitForSelector('input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
         
-        const userInput = await page.$('input[name="userName"]') || 
-                          await page.$('input[name="input1"]') ||
+        const userInput = await page.$('input[name="input1"]') || 
                           await page.$('input[placeholder="Please enter User ID"]');
         if (!userInput) {
             return { success: false, error: 'No se encontró el campo de User ID' };
@@ -354,8 +325,7 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // ========== PASO 4: Ingresar Zone ID ==========
         log('4️⃣', 'Ingresando Zone ID...');
-        const zoneInput = await page.$('input[name="serverId"]') ||
-                          await page.$('input[name="input2"]') ||
+        const zoneInput = await page.$('input[name="input2"]') ||
                           await page.$('input[placeholder="Please enter Zone ID"]');
         if (!zoneInput) {
             return { success: false, error: 'No se encontró el campo de Zone ID' };
@@ -363,17 +333,6 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await zoneInput.click({ clickCount: 3 });
         await zoneInput.type(zoneId, { delay: 30 });
         await sleep(CONFIG.DELAY_MEDIO);
-        
-        // Verificar que los campos tienen valores
-        const camposLlenos = await page.evaluate(() => {
-            const user = document.querySelector('input[name="userName"], input[name="input1"]');
-            const zone = document.querySelector('input[name="serverId"], input[name="input2"]');
-            return {
-                userId: user ? user.value : 'NO ENCONTRADO',
-                zoneId: zone ? zone.value : 'NO ENCONTRADO'
-            };
-        });
-        log('📍', `Campos: UserID=${camposLlenos.userId}, ZoneID=${camposLlenos.zoneId}`);
         
         // Si es modo test, parar aquí
         if (!hacerCompra || CONFIG.MODO_TEST) {
@@ -395,71 +354,17 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 5: Click en "Compra ahora" ==========
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
-        // Cerrar popups antes del click
-        await cerrarPopups();
-        await sleep(500);
-        
-        // Scroll al botón para asegurar visibilidad
         await page.evaluate(() => {
-            const btn = document.querySelector('#buyNowButton');
-            if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
+            if (buyBtn) buyBtn.click();
         });
-        await sleep(500);
         
-        // Verificar si hay errores de validación visibles
-        const errores = await page.evaluate(() => {
-            const alerts = document.querySelectorAll('.alert, .error, .warning, [class*="error"]');
-            const textos = [];
-            alerts.forEach(a => {
-                if (a.offsetParent !== null && a.textContent.trim()) {
-                    textos.push(a.textContent.trim());
-                }
-            });
-            return textos;
-        });
-        if (errores.length > 0) {
-            log('⚠️', `Errores visibles: ${errores.join(', ')}`);
-        }
-        
-        // Verificar que el botón existe
-        const btnExists = await page.evaluate(() => {
-            const btn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
-            return btn ? true : false;
-        });
-        log('📍', `Botón existe: ${btnExists}`);
-        
-        // Screenshot de diagnóstico
-        try { await page.screenshot({ path: './antes_comprar.png' }); } catch {}
-        
-        // Método 1: Click directo con Puppeteer (más confiable)
-        try {
-            const buyBtn = await page.$('#ua-buyNowButton');
-            if (buyBtn) {
-                await buyBtn.click();
-                log('✅', 'Click via Puppeteer');
-            } else {
-                // Método 2: Evaluar en página
-                await page.evaluate(() => {
-                    const btn = document.querySelector('#ua-buyNowButton') || 
-                                document.querySelector('#buyNowButton input[type="submit"]');
-                    if (btn) btn.click();
-                });
-                log('✅', 'Click via evaluate');
-            }
-        } catch (e) {
-            log('⚠️', `Error en click: ${e.message}`);
-        }
-        
-        log('⏳', 'Esperando navegación al checkout...');
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
-            log('⚠️', 'Timeout en navegación');
-        });
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
         await cerrarPopups();
         
         // Verificar checkout
         const currentUrl = page.url();
-        log('📍', `URL actual: ${currentUrl}`);
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
             return { success: false, error: 'No se pudo llegar al checkout' };
         }
