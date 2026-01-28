@@ -1,4 +1,4 @@
-// server.js - RECARGAR-ML-SEAGM v1.0 - Mobile Legends con SEAGM Balance
+// server.js - RECARGAR-ML-SEAGM v2.0 - COPIA EXACTA DE BS
 const puppeteer = require('puppeteer');
 const express = require('express');
 const cors = require('cors');
@@ -12,30 +12,24 @@ app.use(express.json());
 const CONFIG = {
     PORT: process.env.PORT || 3003,
     TIMEOUT: 60000,
+    MAX_REINTENTOS: 2,
     DELAY_RAPIDO: 300,
     DELAY_MEDIO: 800,
     DELAY_LARGO: 1500,
     MODO_TEST: process.env.MODO_TEST === 'true' ? true : false,
-    // URLs de SEAGM
-    URL_MOBILE_LEGENDS: 'https://www.seagm.com/es/mobile-legends-diamonds-top-up',
+    URL_ML: 'https://www.seagm.com/es/mobile-legends-diamonds-top-up',
     URL_LOGIN: 'https://member.seagm.com/es/sso/login',
-    // Credenciales
+    URL_BASE: 'https://www.seagm.com',
     EMAIL: process.env.SEAGM_EMAIL || 'jose.emigdio@gmail.com',
     PASSWORD: process.env.SEAGM_PASSWORD || 'Amateratsu20',
     COOKIES_FILE: './cookies_seagm.json'
 };
 
-// Paquetes Mobile Legends SEAGM
-// Recarga Doble (mayor valor)
-const PAQUETES_DOBLE = {
+const PAQUETES_SEAGM = {
     55:   { sku: '21607', nombre: '50 + 5 Diamonds (Doble)', precio: 1.14 },
     165:  { sku: '21608', nombre: '150 + 15 Diamonds (Doble)', precio: 3.39 },
     275:  { sku: '21609', nombre: '250 + 25 Diamonds (Doble)', precio: 5.64 },
-    565:  { sku: '21610', nombre: '500 + 65 Diamonds (Doble)', precio: 11.49 }
-};
-
-// Paquetes regulares
-const PAQUETES_REGULAR = {
+    565:  { sku: '21610', nombre: '500 + 65 Diamonds (Doble)', precio: 11.49 },
     86:   { sku: '19738', nombre: '78 + 8 Diamonds', precio: 1.32 },
     112:  { sku: '4600', nombre: '102 + 10 Diamonds', precio: 1.88 },
     140:  { sku: '4601', nombre: '127 + 13 Diamonds', precio: 2.90 },
@@ -47,9 +41,6 @@ const PAQUETES_REGULAR = {
     1084: { sku: '16525', nombre: '940 + 144 Diamonds', precio: 21.75 }
 };
 
-// Todos los paquetes combinados
-const PAQUETES_SEAGM = { ...PAQUETES_DOBLE, ...PAQUETES_REGULAR };
-
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 let browser = null;
@@ -58,7 +49,6 @@ let sesionActiva = false;
 let cola = [];
 let procesando = false;
 
-// ========== LOGS ==========
 function log(emoji, mensaje, datos = null) {
     const tiempo = new Date().toLocaleTimeString('es-VE', { timeZone: 'America/Caracas' });
     const texto = `[${tiempo}] ${emoji} ${mensaje}`;
@@ -69,7 +59,6 @@ function log(emoji, mensaje, datos = null) {
     }
 }
 
-// ========== COOKIES / SESIÓN ==========
 async function guardarCookies() {
     if (!page) return;
     try {
@@ -100,22 +89,10 @@ async function cerrarPopups() {
     if (!page) return;
     try {
         const cerrado = await page.evaluate(() => {
-            const allowAll = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll, #CybotCookiebotDialogBodyButtonAccept');
+            const allowAll = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
             if (allowAll && allowAll.offsetParent !== null) {
                 allowAll.click();
                 return 'cookiebot';
-            }
-            const cookiebotDialog = document.querySelector('#CybotCookiebotDialog');
-            if (cookiebotDialog && cookiebotDialog.offsetParent !== null) {
-                const btn = cookiebotDialog.querySelector('button[id*="Allow"], button[id*="Accept"]');
-                if (btn) { btn.click(); return 'cookiebot-dialog'; }
-            }
-            const allButtons = Array.from(document.querySelectorAll('button'));
-            for (const btn of allButtons) {
-                if (btn.textContent.trim() === 'Allow all' && btn.offsetParent !== null) {
-                    btn.click();
-                    return 'allow-all';
-                }
             }
             return null;
         });
@@ -136,9 +113,7 @@ async function verificarSesion() {
             const miCuenta = Array.from(document.querySelectorAll('a')).find(a => 
                 a.textContent.includes('Mi Cuenta') || a.textContent.includes('My Account')
             );
-            if (miCuenta && miCuenta.offsetParent !== null) return true;
-            const bodyText = document.body.innerText;
-            if (bodyText.includes('jose.emigdio') || bodyText.includes('RecargasNexus')) return true;
+            if (miCuenta) return true;
             return false;
         });
         sesionActiva = logueado;
@@ -155,7 +130,7 @@ async function hacerLogin() {
         log('🔐', 'Iniciando login en SEAGM...');
         await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
         
-        // Cerrar Cookiebot
+        // CERRAR COOKIEBOT PRIMERO
         try {
             await page.waitForSelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll', { timeout: 5000 });
             await page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
@@ -204,9 +179,13 @@ async function hacerLogin() {
         log('🚀', 'Login enviado');
         await sleep(4000);
         
-        if (!page.url().includes('/sso/login')) {
+        // Verificar
+        await page.goto(CONFIG.URL_ML, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
+        await sleep(1500);
+        
+        const logueado = await verificarSesion();
+        if (logueado) {
             log('✅', 'Login exitoso!');
-            sesionActiva = true;
             await guardarCookies();
             return true;
         }
@@ -220,18 +199,15 @@ async function hacerLogin() {
 }
 
 async function asegurarSesion() {
-    const logueado = await verificarSesion();
-    if (logueado) return true;
-    log('⚠️', 'Sesión no detectada, intentando login...');
+    if (await verificarSesion()) return true;
     return await hacerLogin();
 }
 
-// ========== INICIAR NAVEGADOR ==========
 async function initBrowser() {
     if (browser) return;
     
-    log('🚀', 'Iniciando navegador...');
     const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
+    log('🚀', 'Iniciando navegador...');
     
     browser = await puppeteer.launch({
         headless: isRailway ? 'new' : false,
@@ -241,63 +217,54 @@ async function initBrowser() {
     
     page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 900 });
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     
     await cargarCookies();
     
-    log('🌐', 'Cargando SEAGM Mobile Legends...');
-    await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
+    log('🌐', 'Cargando SEAGM...');
+    await page.goto(CONFIG.URL_ML, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
     await sleep(2000);
     await cerrarPopups();
     
-    const logueado = await verificarSesion();
-    if (logueado) {
-        log('✅', 'Sesión SEAGM activa');
+    if (await verificarSesion()) {
+        log('✅', 'Sesión activa');
         await guardarCookies();
     } else {
         const loginOk = await hacerLogin();
         if (!loginOk) {
-            log('⚠️', '═'.repeat(45));
             log('⚠️', 'NO SE PUDO INICIAR SESIÓN');
-            log('⚠️', 'Usa POST /cargar-cookies para subir cookies');
-            log('⚠️', '═'.repeat(45));
         }
     }
     
     log('✅', 'Navegador listo');
 }
 
-// ========== RECARGA MOBILE LEGENDS SEAGM ==========
 async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
     const start = Date.now();
     
     try {
-        log('💎', '═'.repeat(50));
-        log('💎', hacerCompra ? 'INICIANDO RECARGA MOBILE LEGENDS (SEAGM)' : 'TEST (SIN COMPRAR)');
-        log('📋', `User ID: ${userId} | Zone ID: ${zoneId} | Diamonds: ${diamonds}`);
-        
-        // Verificar paquete
         const paquete = PAQUETES_SEAGM[diamonds];
         if (!paquete) {
-            return { success: false, error: `Paquete de ${diamonds} Diamonds no disponible` };
+            return { success: false, error: `Paquete ${diamonds} no disponible` };
         }
+        
+        log('💎', '═'.repeat(50));
+        log('💎', 'INICIANDO RECARGA MOBILE LEGENDS (SEAGM)');
+        log('📋', `User ID: ${userId} | Zone ID: ${zoneId} | Diamonds: ${diamonds}`);
         log('📦', `Paquete: ${paquete.nombre} - $${paquete.precio}`);
         
-        // Asegurar sesión
         const sesionOk = await asegurarSesion();
         if (!sesionOk) {
             return { success: false, error: 'No se pudo iniciar sesión en SEAGM' };
         }
         
-        // ========== PASO 1: Ir a página de ML ==========
         log('1️⃣', 'Cargando página de Mobile Legends...');
-        await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
+        await page.goto(CONFIG.URL_ML, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
         await sleep(1500);
         await cerrarPopups();
+        await sleep(500);
         
-        // ========== PASO 2: Seleccionar paquete ==========
         log('2️⃣', `Seleccionando paquete SKU: ${paquete.sku}...`);
-        
         const paqueteSeleccionado = await page.evaluate((sku) => {
             const radio = document.querySelector(`input[name="topupType"][value="${sku}"]`);
             if (radio) { radio.click(); return true; }
@@ -311,11 +278,8 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         }
         await sleep(CONFIG.DELAY_MEDIO);
         
-        // ========== PASO 3: Ingresar User ID ==========
+        // ========== DIFERENCIA CON BS: DOS CAMPOS ==========
         log('3️⃣', 'Ingresando User ID...');
-        
-        await page.waitForSelector('input[name="userName"], input[name="input1"]', { timeout: 10000 });
-        
         const userInput = await page.$('input[name="userName"]') || await page.$('input[name="input1"]');
         if (!userInput) {
             return { success: false, error: 'No se encontró el campo de User ID' };
@@ -324,7 +288,6 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await userInput.type(userId, { delay: 30 });
         await sleep(CONFIG.DELAY_MEDIO);
         
-        // ========== PASO 4: Ingresar Zone ID ==========
         log('4️⃣', 'Ingresando Zone ID...');
         const zoneInput = await page.$('input[name="serverId"]') || await page.$('input[name="input2"]');
         if (!zoneInput) {
@@ -333,8 +296,8 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await zoneInput.click({ clickCount: 3 });
         await zoneInput.type(zoneId, { delay: 30 });
         await sleep(CONFIG.DELAY_MEDIO);
+        // ========== FIN DIFERENCIA ==========
         
-        // Si es modo test, parar aquí
         if (!hacerCompra || CONFIG.MODO_TEST) {
             const elapsed = Date.now() - start;
             log('🧪', `TEST COMPLETADO en ${elapsed}ms`);
@@ -351,9 +314,7 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
             };
         }
         
-        // ========== PASO 5: Click en "Compra ahora" ==========
         log('5️⃣', 'Haciendo click en Comprar ahora...');
-        
         await page.evaluate(() => {
             const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
             if (buyBtn) buyBtn.click();
@@ -361,302 +322,220 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
-        await cerrarPopups();
         
-        // Verificar checkout
         const currentUrl = page.url();
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
+            log('⚠️', 'No se llegó al checkout, URL actual:', currentUrl);
             return { success: false, error: 'No se pudo llegar al checkout' };
         }
+        
         log('✅', 'En página de checkout');
+        await cerrarPopups();
         
-        // ========== PASO 6: Click en "Pagar Ahora" ==========
         log('6️⃣', 'Haciendo click en Pagar Ahora...');
-        
         await page.evaluate(() => {
-            const payBtn = document.querySelector('a.payNowButton, .payNowButton, #ua-checkoutOrderButton, input[type="submit"][value*="Pagar"]');
+            const payBtn = document.querySelector('.payNowButton');
             if (payBtn) payBtn.click();
         });
         
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
-        await cerrarPopups();
         
-        // Verificar página de pago
         const payUrl = page.url();
         if (!payUrl.includes('pay.seagm.com')) {
             return { success: false, error: 'No se pudo llegar a la página de pago' };
         }
+        
         log('✅', 'En página de selección de pago');
         await cerrarPopups();
-        await sleep(500);
         
-        // ========== PASO 7: Seleccionar SEAGM Balance ==========
         log('7️⃣', 'Seleccionando SEAGM Balance...');
-        
-        const balanceSeleccionado = await page.evaluate(() => {
-            const channels = document.querySelectorAll('.channel');
-            for (const ch of channels) {
-                if (ch.textContent.includes('SEAGM Balance') || ch.textContent.includes('SEAGM Saldo')) {
-                    ch.click();
-                    return true;
+        await page.evaluate(() => {
+            const allDivs = document.querySelectorAll('.channel');
+            for (const div of allDivs) {
+                if (div.textContent.includes('SEAGM Balance')) {
+                    div.click();
+                    break;
                 }
             }
-            const radioBalance = document.querySelector('input[value*="balance"], input[name="channel"][value="16"]');
-            if (radioBalance) { radioBalance.click(); return true; }
-            return false;
         });
-        
-        if (!balanceSeleccionado) {
-            return { success: false, error: 'No se pudo seleccionar SEAGM Balance' };
-        }
         await sleep(CONFIG.DELAY_MEDIO);
         
-        // ========== PASO 8: Click en "Pay Now" ==========
         log('8️⃣', 'Haciendo click en Pay Now...');
-        
         await page.evaluate(() => {
-            const payNow = document.querySelector('.btn-pay, button[type="submit"], input[type="submit"]');
-            if (payNow) payNow.click();
+            const payBtn = document.querySelector('.paynow input[type="submit"], label.paynow');
+            if (payBtn) payBtn.click();
         });
+        await sleep(2000);
         
-        await sleep(3000);
-        
-        // ========== PASO 9: Ingresar contraseña de confirmación ==========
         log('9️⃣', 'Ingresando contraseña de confirmación...');
-        
-        const passwordInput = await page.$('#password, input[name="password"], input[type="password"]');
-        if (passwordInput) {
-            await passwordInput.click({ clickCount: 3 });
-            await passwordInput.type(CONFIG.PASSWORD, { delay: 30 });
-            await sleep(CONFIG.DELAY_RAPIDO);
+        const passInput = await page.$('#password');
+        if (passInput) {
+            await passInput.click({ clickCount: 3 });
+            await passInput.type(CONFIG.PASSWORD, { delay: 30 });
+            await sleep(300);
             
-            // Confirmar pago
             log('🔟', 'Confirmando pago...');
             await page.evaluate(() => {
-                const confirmBtn = document.querySelector('button[type="submit"], .btn-confirm, input[type="submit"]');
+                const confirmBtn = document.querySelector('#submit_button input[type="submit"]');
                 if (confirmBtn) confirmBtn.click();
             });
         }
         
-        // ========== PASO 10: Esperar confirmación ==========
         log('⏳', 'Esperando confirmación...');
-        
         await sleep(5000);
         
-        // Verificar éxito
-        const resultado = await page.evaluate(() => {
-            const completado = document.querySelector('.stat.completed, .status-completed, .success');
-            if (completado) return { exito: true };
+        let orderId = null;
+        for (let i = 0; i < 15; i++) {
+            const resultado = await page.evaluate(() => {
+                const completedEl = document.querySelector('.stat.completed');
+                if (completedEl && completedEl.textContent.includes('Completado')) {
+                    const pidEl = document.querySelector('.pid');
+                    return { completado: true, orderId: pidEl?.textContent?.trim() };
+                }
+                return { completado: false };
+            });
             
-            const bodyText = document.body.innerText.toLowerCase();
-            if (bodyText.includes('completado') || bodyText.includes('completed') || bodyText.includes('success')) {
-                return { exito: true };
+            if (resultado.completado) {
+                orderId = resultado.orderId;
+                break;
             }
-            
-            const orderId = document.querySelector('.pid, .order-id, [class*="order"]');
-            if (orderId) {
-                const match = orderId.textContent.match(/P\d+/);
-                if (match) return { exito: true, orderId: match[0] };
-            }
-            
-            return { exito: false };
-        });
-        
-        // Obtener Order ID
-        let orderId = resultado.orderId || null;
-        if (!orderId) {
-            const urlMatch = page.url().match(/trade_id=(\d+)/);
-            if (urlMatch) orderId = 'P' + urlMatch[1];
+            await sleep(1000);
         }
         
         if (!orderId) {
-            orderId = await page.evaluate(() => {
-                const pidEl = document.querySelector('.pid');
-                if (pidEl) return pidEl.textContent.trim();
-                const match = document.body.innerText.match(/P\d{8,}/);
-                return match ? match[0] : null;
-            });
+            return { success: false, error: 'No se pudo confirmar la compra' };
         }
         
         const elapsed = Date.now() - start;
+        log('🎉', `RECARGA COMPLETADA en ${elapsed}ms`);
+        log('🆔', `Order ID: ${orderId}`);
         
-        if (resultado.exito || orderId) {
-            log('🎉', `RECARGA COMPLETADA en ${elapsed}ms`);
-            log('🎫', `Order ID: ${orderId}`);
-            
-            return {
-                success: true,
-                id_juego: userId,
-                zone_id: zoneId,
-                diamonds,
-                paquete: paquete.nombre,
-                precio_usd: paquete.precio,
-                order_id: orderId,
-                time_ms: elapsed,
-                mensaje: `Compra exitosa - ${orderId}`
-            };
-        } else {
-            log('❌', 'No se pudo confirmar la compra');
-            return { success: false, error: 'No se pudo confirmar la compra', time_ms: elapsed };
-        }
+        return {
+            success: true,
+            id_juego: userId,
+            zone_id: zoneId,
+            diamonds,
+            paquete: paquete.nombre,
+            precio_usd: paquete.precio,
+            order_id: orderId,
+            time_ms: elapsed,
+            mensaje: `Compra exitosa - ${orderId}`
+        };
         
     } catch (e) {
         log('❌', `Error: ${e.message}`);
-        return { success: false, error: e.message, time_ms: Date.now() - start };
+        return { success: false, error: e.message };
     }
 }
 
-// ========== COLA ==========
 async function procesarCola() {
     if (procesando || cola.length === 0) return;
-    
     procesando = true;
     const { datos, resolve } = cola.shift();
-    
-    log('⚡', `Procesando de cola (quedan ${cola.length})`);
-    
     const resultado = await ejecutarRecarga(datos.id_juego, datos.zone_id, datos.diamonds, true);
     resolve(resultado);
-    
     procesando = false;
-    
-    if (cola.length > 0) {
-        setTimeout(procesarCola, 1000);
-    }
+    if (cola.length > 0) setTimeout(procesarCola, 1000);
 }
 
 function agregarACola(datos) {
     return new Promise((resolve) => {
         cola.push({ datos, resolve });
-        log('📋', `Agregado a cola (posición ${cola.length})`);
+        log('📥', `Agregado a cola (posición ${cola.length})`);
         procesarCola();
     });
 }
 
 // ========== ENDPOINTS ==========
-
 app.get('/', (req, res) => {
-    res.json({ 
+    res.json({
         status: 'ok',
         servicio: 'RECARGAR-ML-SEAGM',
-        version: '1.0.0',
-        plataforma: 'SEAGM',
+        version: '2.0',
         sesion_activa: sesionActiva,
-        en_cola: cola.length,
-        procesando,
-        modo_test: CONFIG.MODO_TEST
+        modo_test: CONFIG.MODO_TEST,
+        cola: cola.length
     });
 });
 
-app.get('/ping', (req, res) => {
-    res.json({ pong: true, timestamp: Date.now() });
-});
+app.get('/ping', (req, res) => res.json({ pong: true, time: Date.now() }));
 
 app.get('/sesion', async (req, res) => {
     const activa = await verificarSesion();
-    res.json({ sesion_activa: activa, mensaje: activa ? 'Sesión activa' : 'Necesitas iniciar sesión' });
+    res.json({ sesion_activa: activa });
+});
+
+app.post('/login', async (req, res) => {
+    const exito = await hacerLogin();
+    res.json({ success: exito, sesion_activa: sesionActiva });
 });
 
 app.post('/cargar-cookies', async (req, res) => {
+    const { cookies } = req.body;
+    if (!cookies || !Array.isArray(cookies)) {
+        return res.json({ success: false, error: 'Cookies inválidas' });
+    }
     try {
-        const { cookies } = req.body;
-        if (!cookies || !Array.isArray(cookies)) {
-            return res.json({ success: false, error: 'Envía { "cookies": [...] }' });
-        }
-        if (!page) {
-            return res.json({ success: false, error: 'Navegador no inicializado' });
-        }
-        
         await page.setCookie(...cookies);
         fs.writeFileSync(CONFIG.COOKIES_FILE, JSON.stringify(cookies, null, 2));
-        log('🍪', `${cookies.length} cookies cargadas`);
-        
-        await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
-        await sleep(2000);
-        await cerrarPopups();
-        
-        const logueado = await verificarSesion();
-        res.json({ success: logueado, sesion_activa: logueado });
+        await page.goto(CONFIG.URL_ML, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
+        const activa = await verificarSesion();
+        res.json({ success: activa, sesion_activa: activa });
     } catch (e) {
         res.json({ success: false, error: e.message });
     }
 });
 
-app.post('/login', async (req, res) => {
-    const exito = await hacerLogin();
-    res.json({ success: exito });
+app.get('/paquetes', (req, res) => {
+    const lista = Object.entries(PAQUETES_SEAGM).map(([d, info]) => ({
+        diamonds: parseInt(d),
+        nombre: info.nombre,
+        precio_usd: info.precio,
+        sku: info.sku
+    }));
+    res.json({ success: true, paquetes: lista });
 });
 
 app.post('/test', async (req, res) => {
     const { id_juego, zone_id, diamonds } = req.body;
     if (!id_juego || !zone_id || !diamonds) {
-        return res.json({ success: false, error: 'Faltan datos (id_juego, zone_id, diamonds)' });
+        return res.json({ success: false, error: 'Faltan datos: id_juego, zone_id, diamonds' });
     }
     const resultado = await ejecutarRecarga(id_juego, zone_id, parseInt(diamonds), false);
-    res.json({ ...resultado, test_mode: true });
+    res.json(resultado);
 });
 
 app.post('/recarga', async (req, res) => {
     const { id_juego, zone_id, diamonds } = req.body;
     if (!id_juego || !zone_id || !diamonds) {
-        return res.json({ success: false, error: 'Faltan datos (id_juego, zone_id, diamonds)' });
+        return res.json({ success: false, error: 'Faltan datos: id_juego, zone_id, diamonds' });
     }
-    
-    log('🎯', `RECARGA SOLICITADA: ID=${id_juego}(${zone_id}) Diamonds=${diamonds}`);
-    
-    const resultado = await agregarACola({
-        id_juego,
-        zone_id,
-        diamonds: parseInt(diamonds)
-    });
-    
+    log('📥', `RECARGA SOLICITADA: ID=${id_juego}(${zone_id}) Diamonds=${diamonds}`);
+    const resultado = await agregarACola({ id_juego, zone_id, diamonds: parseInt(diamonds) });
     res.json(resultado);
-});
-
-app.get('/paquetes', (req, res) => {
-    const dobles = Object.entries(PAQUETES_DOBLE).map(([d, info]) => ({
-        diamonds: parseInt(d), nombre: info.nombre, precio_usd: info.precio, sku: info.sku, tipo: 'doble'
-    }));
-    const regulares = Object.entries(PAQUETES_REGULAR).map(([d, info]) => ({
-        diamonds: parseInt(d), nombre: info.nombre, precio_usd: info.precio, sku: info.sku, tipo: 'regular'
-    }));
-    
-    res.json({ success: true, plataforma: 'SEAGM', paquetes_doble: dobles, paquetes_regular: regulares });
 });
 
 // ========== INICIO ==========
 async function start() {
-    console.log('\n');
-    log('💎', '═'.repeat(50));
-    log('💎', 'RECARGAR-ML-SEAGM v1.0 - Mobile Legends / SEAGM');
-    log('💎', '═'.repeat(50));
-    log('📍', `Entorno: ${process.env.RAILWAY_ENVIRONMENT ? 'Railway' : 'Local'}`);
-    log('📍', `Puerto: ${CONFIG.PORT}`);
+    const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
     
-    if (CONFIG.MODO_TEST) {
-        log('🧪', '⚠️  MODO TEST - NO compras reales');
-    } else {
-        log('🚨', '💰 MODO PRODUCCIÓN - Compras REALES');
-    }
+    log('💎', '═'.repeat(50));
+    log('💎', 'RECARGAR-ML-SEAGM v2.0 - Mobile Legends / SEAGM');
+    log('💎', '═'.repeat(50));
+    log('📍', `Entorno: ${isRailway ? 'Railway' : 'Local'}`);
+    log('🔌', `Puerto: ${CONFIG.PORT}`);
+    log(CONFIG.MODO_TEST ? '🧪' : '💰', CONFIG.MODO_TEST ? 'MODO TEST' : 'MODO PRODUCCIÓN - Compras REALES');
     
     await initBrowser();
     
     app.listen(CONFIG.PORT, '0.0.0.0', () => {
         log('⚡', `Servidor listo en puerto ${CONFIG.PORT}`);
-        log('📋', 'Endpoints: GET /, /ping, /sesion, /paquetes | POST /login, /cargar-cookies, /test, /recarga');
+        log('📡', `Endpoints: GET /, /ping, /sesion, /paquetes | POST /login, /cargar-cookies, /test, /recarga`);
     });
 }
 
-process.on('SIGINT', async () => { 
-    if (page) await guardarCookies();
-    if (browser) await browser.close(); 
-    process.exit(); 
-});
-process.on('SIGTERM', async () => { 
-    if (page) await guardarCookies();
-    if (browser) await browser.close(); 
-    process.exit(); 
-});
+process.on('SIGINT', async () => { await guardarCookies(); process.exit(); });
+process.on('SIGTERM', async () => { await guardarCookies(); process.exit(); });
 
 start();
