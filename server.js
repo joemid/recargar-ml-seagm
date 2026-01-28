@@ -317,39 +317,27 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // Esperar a que cargue el campo
         await page.waitForSelector('input[name="userName"], input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
         
-        // Llenar campos con evaluate (funciona mejor en headless)
-        const camposOk = await page.evaluate((userId, zoneId) => {
-            const userInput = document.querySelector('input[name="userName"]') || 
-                              document.querySelector('input[name="input1"]') ||
-                              document.querySelector('input[placeholder="Please enter User ID"]');
-            const zoneInput = document.querySelector('input[name="serverId"]') ||
-                              document.querySelector('input[name="input2"]') ||
-                              document.querySelector('input[placeholder="Please enter Zone ID"]');
-            
-            if (!userInput || !zoneInput) {
-                return { error: 'Campos no encontrados', user: !!userInput, zone: !!zoneInput };
-            }
-            
-            // Llenar User ID
-            userInput.value = userId;
-            userInput.dispatchEvent(new Event('input', { bubbles: true }));
-            userInput.dispatchEvent(new Event('change', { bubbles: true }));
-            
-            // Llenar Zone ID
-            zoneInput.value = zoneId;
-            zoneInput.dispatchEvent(new Event('input', { bubbles: true }));
-            zoneInput.dispatchEvent(new Event('change', { bubbles: true }));
-            
-            return { success: true, userValue: userInput.value, zoneValue: zoneInput.value };
-        }, userId, zoneId);
-        
-        if (camposOk.error) {
-            log('❌', `Error: ${camposOk.error}`);
-            return { success: false, error: camposOk.error };
+        const userInput = await page.$('input[name="userName"]') || 
+                          await page.$('input[name="input1"]') || 
+                          await page.$('input[placeholder="Please enter User ID"]');
+        if (!userInput) {
+            return { success: false, error: 'No se encontró el campo de User ID' };
         }
-        log('✅', `Campos llenados: User=${camposOk.userValue}, Zone=${camposOk.zoneValue}`);
+        await userInput.click({ clickCount: 3 });
+        await userInput.type(userId, { delay: 30 });
+        await sleep(CONFIG.DELAY_MEDIO);
         
-        await sleep(2000); // Esperar validación AJAX
+        // ========== PASO 4: Ingresar Zone ID ==========
+        log('4️⃣', 'Ingresando Zone ID...');
+        const zoneInput = await page.$('input[name="serverId"]') ||
+                          await page.$('input[name="input2"]') ||
+                          await page.$('input[placeholder="Please enter Zone ID"]');
+        if (!zoneInput) {
+            return { success: false, error: 'No se encontró el campo de Zone ID' };
+        }
+        await zoneInput.click({ clickCount: 3 });
+        await zoneInput.type(zoneId, { delay: 30 });
+        await sleep(CONFIG.DELAY_MEDIO);
         
         // Si es modo test, parar aquí
         if (!hacerCompra || CONFIG.MODO_TEST) {
