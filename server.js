@@ -161,37 +161,50 @@ async function hacerLogin() {
             await page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
             log('🍪', 'Cookiebot cerrado');
             await sleep(500);
-        } catch (e) {}
+        } catch (e) {
+            await page.evaluate(() => {
+                const btn = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
+                if (btn) btn.click();
+            });
+        }
         
-        const currentUrl = page.url();
-        if (!currentUrl.includes('/sso/login')) {
+        if (!page.url().includes('/sso/login')) {
             log('✅', 'Ya estaba logueado');
             sesionActiva = true;
             await guardarCookies();
             return true;
         }
         
-        const emailTab = await page.$('input[type="radio"][value="email"]');
-        if (emailTab) { await emailTab.click(); await sleep(300); }
-        
+        log('📧', 'Llenando formulario...');
         await page.waitForSelector('#login_email', { timeout: 10000 });
-        await page.click('#login_email', { clickCount: 3 });
-        await page.type('#login_email', CONFIG.EMAIL, { delay: 30 });
-        await sleep(CONFIG.DELAY_RAPIDO);
         
-        await page.click('#login_pass', { clickCount: 3 });
-        await page.type('#login_pass', CONFIG.PASSWORD, { delay: 30 });
-        await sleep(CONFIG.DELAY_RAPIDO);
+        const loginResult = await page.evaluate((email, password) => {
+            const emailRadio = document.querySelector('input[value="email"]');
+            if (emailRadio) emailRadio.click();
+            
+            const emailInput = document.querySelector('#login_email');
+            const passInput = document.querySelector('#login_pass');
+            if (!emailInput || !passInput) return { error: 'Campos no encontrados' };
+            
+            emailInput.value = email;
+            passInput.value = password;
+            emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+            passInput.dispatchEvent(new Event('input', { bubbles: true }));
+            
+            const submitBtn = document.querySelector('#login_btw input[type="submit"]');
+            if (submitBtn) { submitBtn.click(); return { success: true }; }
+            return { error: 'No se pudo enviar' };
+        }, CONFIG.EMAIL, CONFIG.PASSWORD);
         
-        await page.evaluate(() => {
-            const btn = document.querySelector('#login_btw input[type="submit"]');
-            if (btn) btn.click();
-        });
+        if (loginResult.error) {
+            log('❌', loginResult.error);
+            return false;
+        }
         
-        await sleep(5000);
+        log('🚀', 'Login enviado');
+        await sleep(4000);
         
-        const newUrl = page.url();
-        if (!newUrl.includes('/sso/login')) {
+        if (!page.url().includes('/sso/login')) {
             log('✅', 'Login exitoso!');
             sesionActiva = true;
             await guardarCookies();
