@@ -1,4 +1,4 @@
-// server.js - RECARGAR-ML-SEAGM v1.2.0 - Mobile Legends con SEAGM Balance
+// server.js - RECARGAR-ML-SEAGM v1.0 - Mobile Legends con SEAGM Balance
 const puppeteer = require('puppeteer');
 const express = require('express');
 const cors = require('cors');
@@ -155,76 +155,53 @@ async function hacerLogin() {
         log('🔐', 'Iniciando login en SEAGM...');
         await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
         
-        // CERRAR COOKIEBOT PRIMERO
+        // Cerrar Cookiebot
         try {
             await page.waitForSelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll', { timeout: 5000 });
             await page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
             log('🍪', 'Cookiebot cerrado');
             await sleep(500);
-        } catch (e) {
-            await page.evaluate(() => {
-                const btn = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-                if (btn) btn.click();
-            });
-        }
+        } catch (e) {}
         
-        if (!page.url().includes('/sso/login')) {
+        const currentUrl = page.url();
+        if (!currentUrl.includes('/sso/login')) {
             log('✅', 'Ya estaba logueado');
             sesionActiva = true;
             await guardarCookies();
             return true;
         }
         
-        // LLENAR FORMULARIO CON EVALUATE
-        log('📧', 'Llenando formulario...');
+        const emailTab = await page.$('input[type="radio"][value="email"]');
+        if (emailTab) { await emailTab.click(); await sleep(300); }
+        
         await page.waitForSelector('#login_email', { timeout: 10000 });
+        await page.click('#login_email', { clickCount: 3 });
+        await page.type('#login_email', CONFIG.EMAIL, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        const loginResult = await page.evaluate((email, password) => {
-            const emailRadio = document.querySelector('input[value="email"]');
-            if (emailRadio) emailRadio.click();
-            
-            const emailInput = document.querySelector('#login_email');
-            const passInput = document.querySelector('#login_pass');
-            if (!emailInput || !passInput) return { error: 'Campos no encontrados' };
-            
-            emailInput.value = email;
-            passInput.value = password;
-            emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-            passInput.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            const submitBtn = document.querySelector('#login_btw input[type="submit"]');
-            if (submitBtn) { submitBtn.click(); return { success: true }; }
-            return { error: 'No se pudo enviar' };
-        }, CONFIG.EMAIL, CONFIG.PASSWORD);
+        await page.click('#login_pass', { clickCount: 3 });
+        await page.type('#login_pass', CONFIG.PASSWORD, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        if (loginResult.error) {
-            log('❌', loginResult.error);
-            return false;
-        }
+        await page.evaluate(() => {
+            const btn = document.querySelector('#login_btw input[type="submit"]');
+            if (btn) btn.click();
+        });
         
-        log('🚀', 'Login enviado');
-        await sleep(4000);
+        await sleep(5000);
         
-        if (!page.url().includes('/sso/login')) {
+        const newUrl = page.url();
+        if (!newUrl.includes('/sso/login')) {
             log('✅', 'Login exitoso!');
             sesionActiva = true;
             await guardarCookies();
             return true;
         }
         
-        await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        await sleep(1500);
-        
-        const logueado = await verificarSesion();
-        if (logueado) {
-            log('✅', 'Login verificado!');
-            return true;
-        }
-        
         log('❌', 'Login falló');
         return false;
     } catch (e) {
-        log('❌', `Error: ${e.message}`);
+        log('❌', `Error en login: ${e.message}`);
         return false;
     }
 }
@@ -325,10 +302,9 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         log('3️⃣', 'Ingresando User ID...');
         
         // Esperar a que cargue el campo
-        await page.waitForSelector('input[name="userName"], input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
+        await page.waitForSelector('input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
         
-        const userInput = await page.$('input[name="userName"]') || 
-                          await page.$('input[name="input1"]') || 
+        const userInput = await page.$('input[name="input1"]') || 
                           await page.$('input[placeholder="Please enter User ID"]');
         if (!userInput) {
             return { success: false, error: 'No se encontró el campo de User ID' };
@@ -339,8 +315,7 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // ========== PASO 4: Ingresar Zone ID ==========
         log('4️⃣', 'Ingresando Zone ID...');
-        const zoneInput = await page.$('input[name="serverId"]') ||
-                          await page.$('input[name="input2"]') ||
+        const zoneInput = await page.$('input[name="input2"]') ||
                           await page.$('input[placeholder="Please enter Zone ID"]');
         if (!zoneInput) {
             return { success: false, error: 'No se encontró el campo de Zone ID' };
