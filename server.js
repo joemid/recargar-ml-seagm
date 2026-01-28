@@ -239,12 +239,14 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
             return { success: true, test_mode: true, time_ms: Date.now() - start };
         }
         
-        // PASO 5: Click Comprar - EXACTO COMO BS
+        // PASO 5: Click Comprar - MÉTODO PARA HEADLESS
         log('5️⃣', 'Click en Comprar...');
-        await page.evaluate(() => {
-            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
-            if (buyBtn) buyBtn.click();
-        });
+        
+        // Scroll al botón y click directo con Puppeteer
+        await page.waitForSelector('#ua-buyNowButton', { timeout: 10000 });
+        await page.$eval('#ua-buyNowButton', btn => btn.scrollIntoView());
+        await sleep(500);
+        await page.click('#ua-buyNowButton');
         
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
@@ -359,7 +361,7 @@ function agregarACola(datos) {
     });
 }
 
-app.get('/', (req, res) => res.json({ status: 'ok', version: '1.1.0', sesion: sesionActiva }));
+app.get('/', (req, res) => res.json({ status: 'ok', version: '1.1.1', sesion: sesionActiva }));
 app.get('/ping', (req, res) => res.json({ pong: true }));
 app.get('/sesion', async (req, res) => res.json({ sesion_activa: await verificarSesion() }));
 app.post('/login', async (req, res) => res.json({ success: await hacerLogin() }));
