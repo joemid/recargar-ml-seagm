@@ -153,21 +153,9 @@ async function hacerLogin() {
     if (!page) return false;
     try {
         log('🔐', 'Iniciando login en SEAGM...');
-        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        await sleep(1000);
-        
-        // CERRAR COOKIEBOT PRIMERO (igual que BS)
-        try {
-            await page.waitForSelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll', { timeout: 3000 });
-            await page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-            log('🍪', 'Cookiebot cerrado');
-            await sleep(500);
-        } catch (e) {
-            await page.evaluate(() => {
-                const btn = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-                if (btn) btn.click();
-            });
-        }
+        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
+        await sleep(2000);
+        await cerrarPopups();
         
         const currentUrl = page.url();
         if (!currentUrl.includes('/sso/login')) {
@@ -177,43 +165,29 @@ async function hacerLogin() {
             return true;
         }
         
-        log('📧', 'Llenando formulario...');
+        const emailTab = await page.$('input[type="radio"][value="email"]');
+        if (emailTab) { await emailTab.click(); await sleep(300); }
+        
         await page.waitForSelector('#login_email', { timeout: 10000 });
+        await page.click('#login_email', { clickCount: 3 });
+        await page.type('#login_email', CONFIG.EMAIL, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        // LOGIN CON EVALUATE (igual que BS que funciona en Railway)
-        const loginResult = await page.evaluate((email, password) => {
-            const emailRadio = document.querySelector('input[value="email"]');
-            if (emailRadio) emailRadio.click();
-            
-            const emailInput = document.querySelector('#login_email');
-            const passInput = document.querySelector('#login_pass');
-            if (!emailInput || !passInput) return { error: 'Campos no encontrados' };
-            
-            emailInput.value = email;
-            passInput.value = password;
-            emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-            passInput.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            const submitBtn = document.querySelector('#login_btw input[type="submit"]');
-            if (submitBtn) { submitBtn.click(); return { success: true }; }
-            return { error: 'Botón no encontrado' };
-        }, CONFIG.EMAIL, CONFIG.PASSWORD);
+        await page.click('#login_pass', { clickCount: 3 });
+        await page.type('#login_pass', CONFIG.PASSWORD, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        if (loginResult.error) {
-            log('❌', loginResult.error);
-            return false;
-        }
+        await page.evaluate(() => {
+            const btn = document.querySelector('#login_btw input[type="submit"]');
+            if (btn) btn.click();
+        });
         
-        log('🚀', 'Login enviado, esperando...');
-        await sleep(4000);
+        await sleep(5000);
         
-        // Verificar navegando a ML
-        await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        await sleep(1500);
-        
-        const logueado = await verificarSesion();
-        if (logueado) {
+        const newUrl = page.url();
+        if (!newUrl.includes('/sso/login')) {
             log('✅', 'Login exitoso!');
+            sesionActiva = true;
             await guardarCookies();
             return true;
         }
@@ -241,8 +215,8 @@ async function initBrowser() {
     const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
     
     browser = await puppeteer.launch({
-        headless: isRailway ? 'new' : false,
-        executablePath: isRailway ? '/usr/bin/google-chrome-stable' : undefined,
+        headless: 'new',
+        // NO usar Chrome instalado - usar Chromium de Puppeteer igual que local
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1200,900']
     });
     
@@ -369,141 +343,22 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
             if (buyBtn) buyBtn.click();
         });
         
-        await sleep(3000);
-        
-        // FALLBACK: Si el click no navegó (pasa en Railway), hacer POST manual
-        if (page.url().includes('mobile-legends-diamonds-top-up')) {
-            log('⚠️', 'Click no navegó, haciendo POST manual...');
-            
-            const formData = await page.evaluate(() => {
-                const btn = document.querySelector('#ua-buyNowButton');
-                const form = btn ? btn.closest('form') : null;
-                if (!form) return null;
-                
-                const data = {};
-                form.querySelectorAll('input').forEach(input => {
-                    if (input.name && input.type !== 'submit') {
-                        if (input.type === 'radio') {
-                            if (input.checked) data[input.name] = input.value;
-                        } else {
-                            data[input.name] = input.value;
-                        }
-                    }
-                });
-                return { action: form.action, data };
-            });
-            
-            if (formData && formData.action) {
-                log('📋', `POST a: ${formData.action}`);
-                await page.evaluate((action, data) => {
-                    const form = document.createElement('form');
-                    form.method = 'POST';
-                    form.action = action;
-                    for (const [key, value] of Object.entries(data)) {
-                        const input = document.createElement('input');
-                        input.type = 'hidden';
-                        input.name = key;
-                        input.value = value;
-                        form.appendChild(input);
-                    }
-                    document.body.appendChild(form);
-                    form.submit();
-                }, formData.action, formData.data);
-                
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
-                await sleep(2000);
-                
-                // Debug: ver dónde estamos
-                const postUrl = page.url();
-                log('🔗', `URL después de POST: ${postUrl}`);
-                
-                const pageTitle = await page.title();
-                log('📄', `Título: ${pageTitle}`);
-            }
-        } else {
-            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
-            await sleep(2000);
-        }
-        
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+        await sleep(2000);
         await cerrarPopups();
         
         // Verificar checkout
         const currentUrl = page.url();
-        log('🔗', `URL actual: ${currentUrl}`);
-        
-        // Debug: ver contenido de la página
-        const pageInfo = await page.evaluate(() => {
-            return {
-                title: document.title,
-                h1: document.querySelector('h1')?.textContent?.trim(),
-                bodyText: document.body.innerText.substring(0, 300)
-            };
-        });
-        log('📄', `Página: ${pageInfo.title} | H1: ${pageInfo.h1}`);
-        
-        if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart') && !currentUrl.includes('directtopup') && !currentUrl.includes('game_topup_buy')) {
-            log('❌', `No se llegó al checkout. Body: ${pageInfo.bodyText.substring(0, 100)}`);
+        if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
             return { success: false, error: 'No se pudo llegar al checkout' };
         }
         log('✅', 'En página de checkout');
         
-        // DEBUG: Si es directtopup, ver qué hay
-        if (currentUrl.includes('directtopup')) {
-            log('🔍', 'Página directtopup detectada - flujo diferente');
-            
-            const pageContent = await page.evaluate(() => {
-                const forms = document.querySelectorAll('form');
-                const buttons = document.querySelectorAll('button, input[type="submit"], .btn');
-                const inputs = document.querySelectorAll('input');
-                
-                return {
-                    forms: forms.length,
-                    formActions: Array.from(forms).map(f => f.action).slice(0, 3),
-                    buttons: Array.from(buttons).map(b => b.textContent?.trim() || b.value || b.className).slice(0, 10),
-                    inputs: Array.from(inputs).map(i => ({ name: i.name, type: i.type, id: i.id })).slice(0, 10),
-                    hasPassword: !!document.querySelector('#password, input[name="password"]'),
-                    hasBalance: document.body.innerText.includes('SEAGM Balance'),
-                    bodySnippet: document.body.innerText.substring(0, 500)
-                };
-            });
-            log('📋', `Forms: ${pageContent.forms}, Buttons: ${JSON.stringify(pageContent.buttons)}`);
-            log('📋', `Inputs: ${JSON.stringify(pageContent.inputs)}`);
-            log('📋', `hasPassword: ${pageContent.hasPassword}, hasBalance: ${pageContent.hasBalance}`);
-            log('📋', `Body: ${pageContent.bodySnippet.substring(0, 200)}`);
-            
-            // Si ya tiene campo de password, es página de pago directo
-            if (pageContent.hasPassword) {
-                log('🔐', 'Campo de password encontrado - saltando a confirmación');
-                
-                const passwordInput = await page.$('#password') || await page.$('input[name="password"]');
-                if (passwordInput) {
-                    await passwordInput.click({ clickCount: 3 });
-                    await passwordInput.type(CONFIG.PASSWORD, { delay: 30 });
-                    await sleep(500);
-                    
-                    await page.evaluate(() => {
-                        const submitBtn = document.querySelector('#submit_button input[type="submit"], button[type="submit"], input[type="submit"]');
-                        if (submitBtn) submitBtn.click();
-                    });
-                    
-                    await sleep(5000);
-                    // Ir directo a verificar completado
-                }
-            }
-        }
-        
         // ========== PASO 6: Click en "Pagar Ahora" ==========
         log('6️⃣', 'Haciendo click en Pagar Ahora...');
         
-        // Debug: ver qué botones hay
-        const botonesDisponibles = await page.evaluate(() => {
-            const btns = document.querySelectorAll('button, input[type="submit"], a.btn, .btn, .payNowButton');
-            return Array.from(btns).map(b => b.textContent?.trim() || b.value || b.className).slice(0, 5);
-        });
-        log('🔍', `Botones: ${JSON.stringify(botonesDisponibles)}`);
-        
         await page.evaluate(() => {
-            const payBtn = document.querySelector('.payNowButton');
+            const payBtn = document.querySelector('a.payNowButton, .payNowButton, #ua-checkoutOrderButton, input[type="submit"][value*="Pagar"]');
             if (payBtn) payBtn.click();
         });
         
@@ -513,44 +368,31 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // Verificar página de pago
         const payUrl = page.url();
-        log('🔗', `URL de pago: ${payUrl}`);
-        if (!payUrl.includes('pay.seagm.com') && !payUrl.includes('directtopup')) {
+        if (!payUrl.includes('pay.seagm.com')) {
             return { success: false, error: 'No se pudo llegar a la página de pago' };
         }
         log('✅', 'En página de selección de pago');
         await cerrarPopups();
-        await sleep(2000); // Más tiempo para que cargue (igual que BS)
-        
-        // Esperar a que aparezcan las opciones de pago
-        await page.waitForSelector('.channel, [class*="payment"]', { timeout: 10000 }).catch(() => {});
-        await sleep(1000);
+        await sleep(500);
         
         // ========== PASO 7: Seleccionar SEAGM Balance ==========
         log('7️⃣', 'Seleccionando SEAGM Balance...');
         
         const balanceSeleccionado = await page.evaluate(() => {
-            // Buscar en divs con clase channel o payment
-            const allDivs = document.querySelectorAll('.channel, [class*="payment"]');
-            for (const div of allDivs) {
-                if (div.textContent.includes('SEAGM Balance') || div.textContent.includes('SEAGM Saldo')) {
-                    div.click();
+            const channels = document.querySelectorAll('.channel');
+            for (const ch of channels) {
+                if (ch.textContent.includes('SEAGM Balance') || ch.textContent.includes('SEAGM Saldo')) {
+                    ch.click();
                     return true;
                 }
             }
-            // Fallback: buscar imagen
-            const balanceImg = document.querySelector('img[alt="SEAGM Balance"]');
-            if (balanceImg) {
-                balanceImg.closest('.channel, label, div')?.click();
-                return true;
-            }
-            // Fallback: radio button
             const radioBalance = document.querySelector('input[value*="balance"], input[name="channel"][value="16"]');
             if (radioBalance) { radioBalance.click(); return true; }
             return false;
         });
         
         if (!balanceSeleccionado) {
-            log('⚠️', 'No se pudo seleccionar SEAGM Balance automáticamente');
+            return { success: false, error: 'No se pudo seleccionar SEAGM Balance' };
         }
         await sleep(CONFIG.DELAY_MEDIO);
         
@@ -558,25 +400,16 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         log('8️⃣', 'Haciendo click en Pay Now...');
         
         await page.evaluate(() => {
-            const payNow = document.querySelector('.paynow input[type="submit"], label.paynow, .btn-pay, button[type="submit"], input[type="submit"]');
+            const payNow = document.querySelector('.btn-pay, button[type="submit"], input[type="submit"]');
             if (payNow) payNow.click();
         });
         
         await sleep(3000);
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
-        await sleep(2000);
         
         // ========== PASO 9: Ingresar contraseña de confirmación ==========
         log('9️⃣', 'Ingresando contraseña de confirmación...');
         
-        // Debug
-        const passUrl = page.url();
-        log('🔗', `URL: ${passUrl}`);
-        
-        await page.waitForSelector('#password, input[name="password"]', { timeout: 15000 }).catch(() => {});
-        await sleep(500);
-        
-        const passwordInput = await page.$('#password') || await page.$('input[name="password"]');
+        const passwordInput = await page.$('#password, input[name="password"], input[type="password"]');
         if (passwordInput) {
             await passwordInput.click({ clickCount: 3 });
             await passwordInput.type(CONFIG.PASSWORD, { delay: 30 });
@@ -585,71 +418,72 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
             // Confirmar pago
             log('🔟', 'Confirmando pago...');
             await page.evaluate(() => {
-                const submitBtn = document.querySelector('#submit_button input[type="submit"], #submit_button');
-                if (submitBtn) submitBtn.click();
+                const confirmBtn = document.querySelector('button[type="submit"], .btn-confirm, input[type="submit"]');
+                if (confirmBtn) confirmBtn.click();
             });
         }
         
-        // ========== PASO 10: Esperar confirmación (igual que BS) ==========
+        // ========== PASO 10: Esperar confirmación ==========
         log('⏳', 'Esperando confirmación...');
         
         await sleep(5000);
         
-        let orderId = null;
-        let completado = false;
-        
-        for (let i = 0; i < 15; i++) {
-            const resultado = await page.evaluate(() => {
-                const completadoEl = document.querySelector('.stat.completed, [class*="completed"]');
-                if (completadoEl && completadoEl.textContent.includes('Completado')) {
-                    const pidEl = document.querySelector('.pid');
-                    const orderId = pidEl ? pidEl.textContent.trim() : null;
-                    return { completado: true, orderId };
-                }
-                const errorEl = document.querySelector('.alert, .error, [class*="error"]');
-                if (errorEl && errorEl.textContent.trim()) {
-                    return { error: errorEl.textContent.trim() };
-                }
-                return null;
-            });
+        // Verificar éxito
+        const resultado = await page.evaluate(() => {
+            const completado = document.querySelector('.stat.completed, .status-completed, .success');
+            if (completado) return { exito: true };
             
-            if (resultado) {
-                if (resultado.error) {
-                    return { success: false, error: resultado.error };
-                }
-                if (resultado.completado) {
-                    completado = true;
-                    orderId = resultado.orderId;
-                    break;
-                }
+            const bodyText = document.body.innerText.toLowerCase();
+            if (bodyText.includes('completado') || bodyText.includes('completed') || bodyText.includes('success')) {
+                return { exito: true };
             }
-            await sleep(1000);
+            
+            const orderId = document.querySelector('.pid, .order-id, [class*="order"]');
+            if (orderId) {
+                const match = orderId.textContent.match(/P\d+/);
+                if (match) return { exito: true, orderId: match[0] };
+            }
+            
+            return { exito: false };
+        });
+        
+        // Obtener Order ID
+        let orderId = resultado.orderId || null;
+        if (!orderId) {
+            const urlMatch = page.url().match(/trade_id=(\d+)/);
+            if (urlMatch) orderId = 'P' + urlMatch[1];
         }
         
-        if (!completado) {
-            const finalUrl = page.url();
-            log('⚠️', 'URL final:', finalUrl);
-            const screenshotPath = `./debug_${Date.now()}.png`;
-            await page.screenshot({ path: screenshotPath, fullPage: true });
-            log('📸', `Screenshot guardado: ${screenshotPath}`);
-            return { success: false, error: 'No se pudo confirmar la compra' };
+        if (!orderId) {
+            orderId = await page.evaluate(() => {
+                const pidEl = document.querySelector('.pid');
+                if (pidEl) return pidEl.textContent.trim();
+                const match = document.body.innerText.match(/P\d{8,}/);
+                return match ? match[0] : null;
+            });
         }
         
         const elapsed = Date.now() - start;
-        log('🎉', `RECARGA COMPLETADA en ${elapsed}ms`);
-        log('🧾', `Order ID: ${orderId || 'N/A'}`);
         
-        return {
-            success: true,
-            id_juego: userId,
-            zone_id: zoneId,
-            diamonds,
-            paquete: paquete.nombre,
-            precio_usd: paquete.precio,
-            order_id: orderId,
-            time_ms: elapsed,
-            mensaje: `Compra completada - ${orderId || 'OK'}`
-        };
+        if (resultado.exito || orderId) {
+            log('🎉', `RECARGA COMPLETADA en ${elapsed}ms`);
+            log('🎫', `Order ID: ${orderId}`);
+            
+            return {
+                success: true,
+                id_juego: userId,
+                zone_id: zoneId,
+                diamonds,
+                paquete: paquete.nombre,
+                precio_usd: paquete.precio,
+                order_id: orderId,
+                time_ms: elapsed,
+                mensaje: `Compra exitosa - ${orderId}`
+            };
+        } else {
+            log('❌', 'No se pudo confirmar la compra');
+            return { success: false, error: 'No se pudo confirmar la compra', time_ms: elapsed };
+        }
         
     } catch (e) {
         log('❌', `Error: ${e.message}`);
