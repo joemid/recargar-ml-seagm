@@ -314,42 +314,25 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 3: Ingresar User ID ==========
         log('3️⃣', 'Ingresando User ID...');
         
-        // Esperar a que cargue el campo
-        await page.waitForSelector('input[name="userName"], input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
+        await page.waitForSelector('input[name="userName"], input[name="input1"]', { timeout: 10000 });
         
-        const userInput = await page.$('input[name="userName"]') || 
-                          await page.$('input[name="input1"]') || 
-                          await page.$('input[placeholder="Please enter User ID"]');
+        const userInput = await page.$('input[name="userName"]') || await page.$('input[name="input1"]');
         if (!userInput) {
             return { success: false, error: 'No se encontró el campo de User ID' };
         }
         await userInput.click({ clickCount: 3 });
         await userInput.type(userId, { delay: 30 });
-        await sleep(500);
+        await sleep(CONFIG.DELAY_MEDIO);
         
         // ========== PASO 4: Ingresar Zone ID ==========
         log('4️⃣', 'Ingresando Zone ID...');
-        const zoneInput = await page.$('input[name="serverId"]') ||
-                          await page.$('input[name="input2"]') ||
-                          await page.$('input[placeholder="Please enter Zone ID"]');
+        const zoneInput = await page.$('input[name="serverId"]') || await page.$('input[name="input2"]');
         if (!zoneInput) {
             return { success: false, error: 'No se encontró el campo de Zone ID' };
         }
         await zoneInput.click({ clickCount: 3 });
         await zoneInput.type(zoneId, { delay: 30 });
-        
-        // Click afuera para disparar validación
-        await page.keyboard.press('Tab');
-        await sleep(2000);
-        
-        // Verificar si hay error de validación
-        const hayError = await page.evaluate(() => {
-            const err = document.querySelector('.error, .alert, [class*="error"]');
-            return err?.textContent?.trim() || null;
-        });
-        if (hayError) {
-            log('⚠️', `Error validación: ${hayError}`);
-        }
+        await sleep(CONFIG.DELAY_MEDIO);
         
         // Si es modo test, parar aquí
         if (!hacerCompra || CONFIG.MODO_TEST) {
@@ -371,29 +354,10 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 5: Click en "Compra ahora" ==========
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
-        // Verificar estado del botón
-        const btnInfo = await page.evaluate(() => {
-            const btn = document.querySelector('#ua-buyNowButton');
-            if (!btn) return { found: false };
-            return { found: true, disabled: btn.disabled, type: btn.type };
+        await page.evaluate(() => {
+            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
+            if (buyBtn) buyBtn.click();
         });
-        log('🔍', `Botón: ${JSON.stringify(btnInfo)}`);
-        
-        // Intentar submit con form
-        const submitted = await page.evaluate(() => {
-            const form = document.querySelector('form[name="topup_data"]');
-            if (form) {
-                form.submit();
-                return 'form.submit';
-            }
-            const btn = document.querySelector('#ua-buyNowButton');
-            if (btn) {
-                btn.click();
-                return 'btn.click';
-            }
-            return null;
-        });
-        log('📤', `Método: ${submitted}`);
         
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
@@ -401,7 +365,6 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // Verificar checkout
         const currentUrl = page.url();
-        log('🔗', `URL después de click: ${currentUrl}`);
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
             return { success: false, error: 'No se pudo llegar al checkout' };
         }
