@@ -364,6 +364,10 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await zoneInput.type(zoneId, { delay: 30 });
         await sleep(CONFIG.DELAY_MEDIO);
         
+        // Esperar validación del formulario
+        await sleep(2000);
+        await cerrarPopups();
+        
         // Si es modo test, parar aquí
         if (!hacerCompra || CONFIG.MODO_TEST) {
             const elapsed = Date.now() - start;
@@ -384,9 +388,22 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 5: Click en "Compra ahora" ==========
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
+        // Verificar que el botón existe
+        const btnExiste = await page.evaluate(() => {
+            const btn = document.querySelector('#ua-buyNowButton');
+            return btn ? { existe: true, disabled: btn.disabled } : { existe: false };
+        });
+        log('🔍', `Botón: ${JSON.stringify(btnExiste)}`);
+        
+        // Click usando el formulario submit
         await page.evaluate(() => {
-            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
-            if (buyBtn) buyBtn.click();
+            const form = document.querySelector('form');
+            const buyBtn = document.querySelector('#ua-buyNowButton');
+            if (buyBtn) {
+                buyBtn.click();
+            } else if (form) {
+                form.submit();
+            }
         });
         
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
@@ -395,6 +412,7 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // Verificar checkout
         const currentUrl = page.url();
+        log('🔗', `URL actual: ${currentUrl}`);
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
             return { success: false, error: 'No se pudo llegar al checkout' };
         }
@@ -570,7 +588,7 @@ app.get('/', (req, res) => {
     res.json({ 
         status: 'ok',
         servicio: 'RECARGAR-ML-SEAGM',
-        version: "1.0.4",
+        version: "1.0.5",
         plataforma: 'SEAGM',
         sesion_activa: sesionActiva,
         en_cola: cola.length,
