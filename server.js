@@ -278,17 +278,9 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         log('1️⃣', 'Cargando página de Mobile Legends...');
         await page.goto(CONFIG.URL_ML, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
-        await sleep(3000); // Más tiempo
+        await sleep(1500);
         await cerrarPopups();
-        await sleep(1000);
-        
-        // Verificar que la página cargó completamente
-        const pageReady = await page.evaluate(() => {
-            return document.readyState === 'complete' && 
-                   !!document.querySelector('#ua-buyNowButton') &&
-                   !!document.querySelector('input[name="userName"]');
-        });
-        log('📄', `Página lista: ${pageReady}`);
+        await sleep(500);
         
         log('2️⃣', `Seleccionando paquete SKU: ${paquete.sku}...`);
         const paqueteSeleccionado = await page.evaluate((sku) => {
@@ -304,47 +296,35 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         }
         await sleep(CONFIG.DELAY_MEDIO);
         
-        // ========== CAMPOS ==========
-        log('3️⃣', 'Ingresando User ID y Zone ID...');
-        
-        // DEBUG: Ver qué inputs hay
-        const inputsDebug = await page.evaluate(() => {
-            const inputs = document.querySelectorAll('input[type="text"], input[type="number"]');
-            return Array.from(inputs).map(i => ({ name: i.name, placeholder: i.placeholder, id: i.id }));
-        });
-        log('🔍', `Inputs disponibles: ${JSON.stringify(inputsDebug)}`);
-        
-        const fillResult = await page.evaluate((userId, zoneId) => {
-            // Intentar múltiples selectores
-            const userInput = document.querySelector('input[name="userName"]') || 
-                              document.querySelector('input[name="input1"]') ||
-                              document.querySelector('input[placeholder*="User ID"]');
-            const zoneInput = document.querySelector('input[name="serverId"]') || 
-                              document.querySelector('input[name="input2"]') ||
-                              document.querySelector('input[placeholder*="Zone ID"]');
-            
-            if (!userInput || !zoneInput) {
-                return { error: 'Campos no encontrados', user: !!userInput, zone: !!zoneInput };
-            }
-            
-            // Igual que login: .value + dispatchEvent
-            userInput.value = userId;
-            userInput.dispatchEvent(new Event('input', { bubbles: true }));
-            userInput.dispatchEvent(new Event('change', { bubbles: true }));
-            
-            zoneInput.value = zoneId;
-            zoneInput.dispatchEvent(new Event('input', { bubbles: true }));
-            zoneInput.dispatchEvent(new Event('change', { bubbles: true }));
-            
-            return { success: true, user: userInput.value, zone: zoneInput.value };
-        }, userId, zoneId);
-        
-        if (fillResult.error) {
-            log('❌', fillResult.error);
-            return { success: false, error: fillResult.error };
+        // ========== CAMPOS - EXACTAMENTE COMO BS ==========
+        log('3️⃣', 'Ingresando User ID...');
+        const userIdInput = await page.$('input[name="userName"]');
+        if (!userIdInput) {
+            return { success: false, error: 'No se encontró el campo de User ID' };
         }
-        log('✅', `Campos llenados: User=${fillResult.user} Zone=${fillResult.zone}`);
+        await userIdInput.click({ clickCount: 3 });
+        await userIdInput.type(userId, { delay: 30 });
         await sleep(CONFIG.DELAY_MEDIO);
+        
+        log('4️⃣', 'Ingresando Zone ID...');
+        const zoneIdInput = await page.$('input[name="serverId"]');
+        if (!zoneIdInput) {
+            return { success: false, error: 'No se encontró el campo de Zone ID' };
+        }
+        await zoneIdInput.click({ clickCount: 3 });
+        await zoneIdInput.type(zoneId, { delay: 30 });
+        await sleep(CONFIG.DELAY_MEDIO);
+        
+        // Verificar que los valores quedaron
+        const valores = await page.evaluate(() => {
+            const user = document.querySelector('input[name="userName"]');
+            const zone = document.querySelector('input[name="serverId"]');
+            return {
+                userId: user ? user.value : 'NO ENCONTRADO',
+                zoneId: zone ? zone.value : 'NO ENCONTRADO'
+            };
+        });
+        log('✅', `Valores: userId=${valores.userId} zoneId=${valores.zoneId}`);
         // ========== FIN CAMPOS ==========
         
         if (!hacerCompra || CONFIG.MODO_TEST) {
@@ -365,16 +345,45 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
-        await cerrarPopups();
-        await sleep(500);
-        
-        // Click simple - igual que en local que funciona
-        await page.evaluate(() => {
+        // Verificar estado del botón antes del click
+        const btnStatus = await page.evaluate(() => {
             const btn = document.querySelector('#ua-buyNowButton');
-            if (btn) btn.click();
+            if (!btn) return { found: false };
+            const form = btn.closest('form');
+            return {
+                found: true,
+                disabled: btn.disabled,
+                type: btn.type,
+                value: btn.value,
+                visible: btn.offsetParent !== null,
+                inForm: !!form,
+                formAction: form ? form.action : null
+            };
         });
+        log('🔍', `Botón: ${JSON.stringify(btnStatus)}`);
         
-        // Esperar navegación
+        // Click
+        await page.evaluate(() => {
+            const buyBtn = document.querySelector('#ua-buyNowButton');
+            if (buyBtn) buyBtn.click();
+        });
+        log('👆', 'Click ejecutado');
+        
+        // Esperar un poco y ver si navegó
+        await sleep(3000);
+        
+        // Si no navegó, intentar submit del form que contiene el botón
+        if (page.url().includes('mobile-legends-diamonds-top-up')) {
+            log('⚠️', 'Click no navegó, intentando form del botón...');
+            await page.evaluate(() => {
+                const btn = document.querySelector('#ua-buyNowButton');
+                const form = btn ? btn.closest('form') : null;
+                if (form) {
+                    form.submit();
+                }
+            });
+        }
+        
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
         
