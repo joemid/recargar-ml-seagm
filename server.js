@@ -436,8 +436,15 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         log('📍', `Botón click: ${JSON.stringify(buyClicked)}`);
         
-        // Esperar navegación
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+        // Esperar navegación con timeout corto
+        log('⏳', 'Esperando navegación...');
+        try {
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
+            log('✅', 'Navegación completada');
+        } catch (e) {
+            log('⚠️', 'Timeout en navegación, continuando...');
+        }
+        
         await sleep(2000);
         await cerrarPopups();
         
@@ -456,17 +463,35 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 6: Click en "Pagar Ahora" ==========
         log('6️⃣', 'Haciendo click en Pagar Ahora...');
         
-        await page.evaluate(() => {
-            const payBtn = document.querySelector('a.payNowButton, .payNowButton, #ua-checkoutOrderButton, input[type="submit"][value*="Pagar"]');
-            if (payBtn) payBtn.click();
+        const payClicked = await page.evaluate(() => {
+            const selectores = [
+                'a.payNowButton',
+                '.payNowButton',
+                '#ua-checkoutOrderButton',
+                'input[type="submit"][value*="Pagar"]',
+                'a[class*="payNow"]'
+            ];
+            for (const sel of selectores) {
+                const btn = document.querySelector(sel);
+                if (btn) { btn.click(); return sel; }
+            }
+            return null;
         });
+        log('📍', `Pagar Ahora click: ${payClicked}`);
         
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+        log('⏳', 'Esperando página de pago...');
+        try {
+            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
+            log('✅', 'Navegación completada');
+        } catch (e) {
+            log('⚠️', 'Timeout, continuando...');
+        }
         await sleep(2000);
         await cerrarPopups();
         
         // Verificar página de pago
         const payUrl = page.url();
+        log('📍', `URL pago: ${payUrl}`);
         if (!payUrl.includes('pay.seagm.com')) {
             return { success: false, error: 'No se pudo llegar a la página de pago' };
         }
