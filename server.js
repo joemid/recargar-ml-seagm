@@ -221,29 +221,10 @@ async function hacerLogin() {
         
         await sleep(4000);
         
-        const error = await page.evaluate(() => {
-            const alert = document.querySelector('#email_login_alert');
-            return alert?.textContent?.trim() || null;
-        });
-        
-        if (error) {
-            log('❌', `Error: ${error}`);
-            return false;
-        }
-        
         if (!page.url().includes('/sso/login')) {
             log('✅', 'Login exitoso!');
             sesionActiva = true;
             await guardarCookies();
-            return true;
-        }
-        
-        await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        await sleep(1500);
-        
-        const logueado = await verificarSesion();
-        if (logueado) {
-            log('✅', 'Login verificado!');
             return true;
         }
         
@@ -252,7 +233,6 @@ async function hacerLogin() {
         
     } catch (e) {
         log('❌', `Error: ${e.message}`);
-        try { await page.screenshot({ path: './error_login.png' }); } catch {}
         return false;
     }
 }
@@ -296,9 +276,8 @@ async function initBrowser() {
         const loginOk = await hacerLogin();
         if (loginOk) {
             log('✅', 'Login automático exitoso');
-            // Navegar a Mobile Legends después del login
             log('🌐', 'Navegando a Mobile Legends...');
-            await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
+            await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
             await sleep(1500);
             await cerrarPopups();
         } else {
@@ -345,15 +324,16 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         const paqueteSeleccionado = await page.evaluate((sku) => {
             const radio = document.querySelector(`input[name="topupType"][value="${sku}"]`);
-            if (radio) { radio.click(); return true; }
+            if (radio) { radio.click(); return 'radio'; }
             const skuDiv = document.querySelector(`.SKU_type[data-sku="${sku}"]`);
-            if (skuDiv) { skuDiv.click(); return true; }
+            if (skuDiv) { skuDiv.click(); return 'skuDiv'; }
             return false;
         }, paquete.sku);
         
         if (!paqueteSeleccionado) {
             return { success: false, error: `No se pudo seleccionar el paquete ${paquete.nombre}` };
         }
+        log('📍', `Paquete seleccionado via: ${paqueteSeleccionado}`);
         await sleep(CONFIG.DELAY_MEDIO);
         
         // ========== PASO 3: Ingresar User ID ==========
@@ -382,6 +362,17 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await zoneInput.type(zoneId, { delay: 30 });
         await sleep(CONFIG.DELAY_MEDIO);
         
+        // Verificar que los campos tienen valores
+        const camposLlenos = await page.evaluate(() => {
+            const user = document.querySelector('input[name="input1"]');
+            const zone = document.querySelector('input[name="input2"]');
+            return {
+                userId: user ? user.value : 'NO ENCONTRADO',
+                zoneId: zone ? zone.value : 'NO ENCONTRADO'
+            };
+        });
+        log('📍', `Campos: UserID=${camposLlenos.userId}, ZoneID=${camposLlenos.zoneId}`);
+        
         // Si es modo test, parar aquí
         if (!hacerCompra || CONFIG.MODO_TEST) {
             const elapsed = Date.now() - start;
@@ -402,60 +393,36 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 5: Click en "Compra ahora" ==========
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
-        const buyClicked = await page.evaluate(() => {
-            // Intentar múltiples selectores
-            const selectores = [
-                '#buyNowButton input[type="submit"]',
-                '#ua-buyNowButton',
-                'input[value="Compra ahora"]',
-                'input[value="Buy Now"]',
-                '#buyNowButton',
-                '.buy-now-btn',
-                'button.buy-now'
-            ];
-            
-            for (const sel of selectores) {
-                const btn = document.querySelector(sel);
-                if (btn) {
-                    btn.click();
-                    return { clicked: true, selector: sel };
-                }
-            }
-            
-            // Último recurso: buscar por texto
-            const inputs = document.querySelectorAll('input[type="submit"]');
-            for (const inp of inputs) {
-                if (inp.value && (inp.value.includes('Compra') || inp.value.includes('Buy'))) {
-                    inp.click();
-                    return { clicked: true, selector: 'input-text-search' };
-                }
-            }
-            
-            return { clicked: false };
+        // Cerrar popups antes del click
+        await cerrarPopups();
+        await sleep(500);
+        
+        // Verificar que el botón existe
+        const btnExists = await page.evaluate(() => {
+            const btn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
+            return btn ? true : false;
+        });
+        log('📍', `Botón existe: ${btnExists}`);
+        
+        // Screenshot de diagnóstico
+        try { await page.screenshot({ path: './antes_comprar.png' }); } catch {}
+        
+        await page.evaluate(() => {
+            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
+            if (buyBtn) buyBtn.click();
         });
         
-        log('📍', `Botón click: ${JSON.stringify(buyClicked)}`);
-        
-        // Esperar navegación con timeout corto
-        log('⏳', 'Esperando navegación...');
-        try {
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
-            log('✅', 'Navegación completada');
-        } catch (e) {
-            log('⚠️', 'Timeout en navegación, continuando...');
-        }
-        
+        log('⏳', 'Esperando navegación al checkout...');
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
+            log('⚠️', 'Timeout en navegación');
+        });
         await sleep(2000);
         await cerrarPopups();
         
         // Verificar checkout
         const currentUrl = page.url();
         log('📍', `URL actual: ${currentUrl}`);
-        
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
-            // Screenshot para debug
-            try { await page.screenshot({ path: './error_checkout.png' }); } catch {}
-            log('❌', 'No se llegó al checkout');
             return { success: false, error: 'No se pudo llegar al checkout' };
         }
         log('✅', 'En página de checkout');
@@ -463,35 +430,17 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 6: Click en "Pagar Ahora" ==========
         log('6️⃣', 'Haciendo click en Pagar Ahora...');
         
-        const payClicked = await page.evaluate(() => {
-            const selectores = [
-                'a.payNowButton',
-                '.payNowButton',
-                '#ua-checkoutOrderButton',
-                'input[type="submit"][value*="Pagar"]',
-                'a[class*="payNow"]'
-            ];
-            for (const sel of selectores) {
-                const btn = document.querySelector(sel);
-                if (btn) { btn.click(); return sel; }
-            }
-            return null;
+        await page.evaluate(() => {
+            const payBtn = document.querySelector('a.payNowButton, .payNowButton, #ua-checkoutOrderButton, input[type="submit"][value*="Pagar"]');
+            if (payBtn) payBtn.click();
         });
-        log('📍', `Pagar Ahora click: ${payClicked}`);
         
-        log('⏳', 'Esperando página de pago...');
-        try {
-            await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
-            log('✅', 'Navegación completada');
-        } catch (e) {
-            log('⚠️', 'Timeout, continuando...');
-        }
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
         await cerrarPopups();
         
         // Verificar página de pago
         const payUrl = page.url();
-        log('📍', `URL pago: ${payUrl}`);
         if (!payUrl.includes('pay.seagm.com')) {
             return { success: false, error: 'No se pudo llegar a la página de pago' };
         }
