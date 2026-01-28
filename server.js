@@ -153,15 +153,9 @@ async function hacerLogin() {
     if (!page) return false;
     try {
         log('🔐', 'Iniciando login en SEAGM...');
-        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        
-        // Cerrar Cookiebot (solo evaluate, no page.click)
+        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
         await sleep(2000);
-        await page.evaluate(() => {
-            const btn = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-            if (btn) btn.click();
-        });
-        await sleep(500);
+        await cerrarPopups();
         
         if (!page.url().includes('/sso/login')) {
             log('✅', 'Ya estaba logueado');
@@ -170,10 +164,8 @@ async function hacerLogin() {
             return true;
         }
         
-        log('📧', 'Llenando formulario...');
         await page.waitForSelector('#login_email', { timeout: 10000 });
         
-        // LOGIN CON EVALUATE (igual que BS)
         const loginResult = await page.evaluate((email, password) => {
             const emailRadio = document.querySelector('input[value="email"]');
             if (emailRadio) emailRadio.click();
@@ -197,8 +189,7 @@ async function hacerLogin() {
             return false;
         }
         
-        log('🚀', 'Login enviado');
-        await sleep(4000);
+        await sleep(5000);
         
         if (!page.url().includes('/sso/login')) {
             log('✅', 'Login exitoso!');
@@ -307,30 +298,36 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         }
         await sleep(CONFIG.DELAY_MEDIO);
         
-        // ========== PASO 3: Ingresar User ID ==========
+        // ========== PASO 3 y 4: Ingresar User ID y Zone ID ==========
         log('3️⃣', 'Ingresando User ID...');
-        
-        // Esperar a que cargue el campo
         await page.waitForSelector('input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
         
-        const userInput = await page.$('input[name="input1"]') || 
-                          await page.$('input[placeholder="Please enter User ID"]');
-        if (!userInput) {
-            return { success: false, error: 'No se encontró el campo de User ID' };
-        }
-        await userInput.click({ clickCount: 3 });
-        await userInput.type(userId, { delay: 30 });
-        await sleep(CONFIG.DELAY_MEDIO);
-        
-        // ========== PASO 4: Ingresar Zone ID ==========
         log('4️⃣', 'Ingresando Zone ID...');
-        const zoneInput = await page.$('input[name="input2"]') ||
-                          await page.$('input[placeholder="Please enter Zone ID"]');
-        if (!zoneInput) {
-            return { success: false, error: 'No se encontró el campo de Zone ID' };
+        const fillResult = await page.evaluate((userId, zoneId) => {
+            const userInput = document.querySelector('input[name="input1"]') || 
+                              document.querySelector('input[placeholder="Please enter User ID"]');
+            const zoneInput = document.querySelector('input[name="input2"]') ||
+                              document.querySelector('input[placeholder="Please enter Zone ID"]');
+            
+            if (!userInput || !zoneInput) {
+                return { error: 'Campos no encontrados' };
+            }
+            
+            userInput.value = userId;
+            userInput.dispatchEvent(new Event('input', { bubbles: true }));
+            userInput.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            zoneInput.value = zoneId;
+            zoneInput.dispatchEvent(new Event('input', { bubbles: true }));
+            zoneInput.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            return { success: true, user: userInput.value, zone: zoneInput.value };
+        }, userId, zoneId);
+        
+        if (fillResult.error) {
+            return { success: false, error: fillResult.error };
         }
-        await zoneInput.click({ clickCount: 3 });
-        await zoneInput.type(zoneId, { delay: 30 });
+        log('✅', `Campos: User=${fillResult.user} Zone=${fillResult.zone}`);
         await sleep(CONFIG.DELAY_MEDIO);
         
         // Si es modo test, parar aquí
@@ -424,17 +421,27 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 9: Ingresar contraseña de confirmación ==========
         log('9️⃣', 'Ingresando contraseña de confirmación...');
         
-        const passwordInput = await page.$('#password, input[name="password"], input[type="password"]');
-        if (passwordInput) {
-            await passwordInput.click({ clickCount: 3 });
-            await passwordInput.type(CONFIG.PASSWORD, { delay: 30 });
-            await sleep(CONFIG.DELAY_RAPIDO);
+        await page.waitForSelector('#password, input[name="password"]', { timeout: 15000 }).catch(() => {});
+        await sleep(500);
+        
+        const passResult = await page.evaluate((password) => {
+            const passInput = document.querySelector('#password') || document.querySelector('input[name="password"]');
+            if (!passInput) return { error: 'Campo no encontrado' };
             
-            // Confirmar pago
+            passInput.value = password;
+            passInput.dispatchEvent(new Event('input', { bubbles: true }));
+            passInput.dispatchEvent(new Event('change', { bubbles: true }));
+            return { success: true };
+        }, CONFIG.PASSWORD);
+        
+        if (passResult.error) {
+            log('⚠️', passResult.error);
+        } else {
+            await sleep(500);
             log('🔟', 'Confirmando pago...');
             await page.evaluate(() => {
-                const confirmBtn = document.querySelector('button[type="submit"], .btn-confirm, input[type="submit"]');
-                if (confirmBtn) confirmBtn.click();
+                const submitBtn = document.querySelector('#submit_button input[type="submit"], #submit_button');
+                if (submitBtn) submitBtn.click();
             });
         }
         
