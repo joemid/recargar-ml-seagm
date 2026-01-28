@@ -390,8 +390,9 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         });
         log('🔍', `Click result: ${JSON.stringify(clickResult)}`);
         
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
-        await sleep(2000);
+        // NO usar waitForNavigation - solo esperar
+        log('⏳', 'Esperando navegación...');
+        await sleep(5000);
         await cerrarPopups();
         
         // Verificar checkout
@@ -429,8 +430,8 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
             if (payBtn) payBtn.click();
         });
         
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
-        await sleep(2000);
+        log('⏳', 'Esperando navegación a pago...');
+        await sleep(5000);
         await cerrarPopups();
         
         // Verificar página de pago
