@@ -315,9 +315,10 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         log('3️⃣', 'Ingresando User ID...');
         
         // Esperar a que cargue el campo
-        await page.waitForSelector('input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
+        await page.waitForSelector('input[name="userName"], input[name="input1"], input[placeholder*="User ID"]', { timeout: 10000 });
         
-        const userInput = await page.$('input[name="input1"]') || 
+        const userInput = await page.$('input[name="userName"]') || 
+                          await page.$('input[name="input1"]') || 
                           await page.$('input[placeholder="Please enter User ID"]');
         if (!userInput) {
             return { success: false, error: 'No se encontró el campo de User ID' };
@@ -328,7 +329,8 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // ========== PASO 4: Ingresar Zone ID ==========
         log('4️⃣', 'Ingresando Zone ID...');
-        const zoneInput = await page.$('input[name="input2"]') ||
+        const zoneInput = await page.$('input[name="serverId"]') ||
+                          await page.$('input[name="input2"]') ||
                           await page.$('input[placeholder="Please enter Zone ID"]');
         if (!zoneInput) {
             return { success: false, error: 'No se encontró el campo de Zone ID' };
