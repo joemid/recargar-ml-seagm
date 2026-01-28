@@ -402,18 +402,53 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 5: Click en "Compra ahora" ==========
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
-        await page.evaluate(() => {
-            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
-            if (buyBtn) buyBtn.click();
+        const buyClicked = await page.evaluate(() => {
+            // Intentar múltiples selectores
+            const selectores = [
+                '#buyNowButton input[type="submit"]',
+                '#ua-buyNowButton',
+                'input[value="Compra ahora"]',
+                'input[value="Buy Now"]',
+                '#buyNowButton',
+                '.buy-now-btn',
+                'button.buy-now'
+            ];
+            
+            for (const sel of selectores) {
+                const btn = document.querySelector(sel);
+                if (btn) {
+                    btn.click();
+                    return { clicked: true, selector: sel };
+                }
+            }
+            
+            // Último recurso: buscar por texto
+            const inputs = document.querySelectorAll('input[type="submit"]');
+            for (const inp of inputs) {
+                if (inp.value && (inp.value.includes('Compra') || inp.value.includes('Buy'))) {
+                    inp.click();
+                    return { clicked: true, selector: 'input-text-search' };
+                }
+            }
+            
+            return { clicked: false };
         });
         
+        log('📍', `Botón click: ${JSON.stringify(buyClicked)}`);
+        
+        // Esperar navegación
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
         await cerrarPopups();
         
         // Verificar checkout
         const currentUrl = page.url();
+        log('📍', `URL actual: ${currentUrl}`);
+        
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
+            // Screenshot para debug
+            try { await page.screenshot({ path: './error_checkout.png' }); } catch {}
+            log('❌', 'No se llegó al checkout');
             return { success: false, error: 'No se pudo llegar al checkout' };
         }
         log('✅', 'En página de checkout');
