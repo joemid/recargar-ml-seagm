@@ -345,47 +345,66 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
-        // Verificar estado del botón antes del click
-        const btnStatus = await page.evaluate(() => {
+        // Obtener datos del form
+        const formData = await page.evaluate(() => {
             const btn = document.querySelector('#ua-buyNowButton');
-            if (!btn) return { found: false };
-            const form = btn.closest('form');
+            const form = btn ? btn.closest('form') : null;
+            if (!form) return { error: 'No form' };
+            
+            const data = {};
+            const inputs = form.querySelectorAll('input');
+            inputs.forEach(input => {
+                if (input.name) {
+                    if (input.type === 'radio') {
+                        if (input.checked) data[input.name] = input.value;
+                    } else if (input.type !== 'submit') {
+                        data[input.name] = input.value;
+                    }
+                }
+            });
+            
             return {
-                found: true,
-                disabled: btn.disabled,
-                type: btn.type,
-                value: btn.value,
-                visible: btn.offsetParent !== null,
-                inForm: !!form,
-                formAction: form ? form.action : null
+                action: form.action,
+                method: form.method || 'POST',
+                data: data
             };
         });
-        log('🔍', `Botón: ${JSON.stringify(btnStatus)}`);
+        log('📋', `Form: action=${formData.action?.substring(0, 80)}, method=${formData.method}`);
+        log('📋', `Data: ${JSON.stringify(formData.data)}`);
         
-        // Click
+        // Click normal
         await page.evaluate(() => {
             const buyBtn = document.querySelector('#ua-buyNowButton');
             if (buyBtn) buyBtn.click();
         });
         log('👆', 'Click ejecutado');
         
-        // Esperar un poco y ver si navegó
         await sleep(3000);
         
-        // Si no navegó, intentar submit del form que contiene el botón
-        if (page.url().includes('mobile-legends-diamonds-top-up')) {
-            log('⚠️', 'Click no navegó, intentando form del botón...');
-            await page.evaluate(() => {
-                const btn = document.querySelector('#ua-buyNowButton');
-                const form = btn ? btn.closest('form') : null;
-                if (form) {
-                    form.submit();
+        // Si no navegó, hacer submit manual del form
+        if (page.url().includes('mobile-legends-diamonds-top-up') && formData.action) {
+            log('⚠️', 'Click no navegó, haciendo POST manual...');
+            
+            // Crear form temporal y hacer submit
+            await page.evaluate((action, data) => {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = action;
+                
+                for (const [key, value] of Object.entries(data)) {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = key;
+                    input.value = value;
+                    form.appendChild(input);
                 }
-            });
+                
+                document.body.appendChild(form);
+                form.submit();
+            }, formData.action, formData.data);
+            
+            await sleep(5000);
         }
-        
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
-        await sleep(2000);
         
         const currentUrl = page.url();
         log('🔗', `URL: ${currentUrl}`);
