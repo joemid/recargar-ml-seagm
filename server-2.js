@@ -153,21 +153,9 @@ async function hacerLogin() {
     if (!page) return false;
     try {
         log('🔐', 'Iniciando login en SEAGM...');
-        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        await sleep(1000);
-        
-        // CERRAR COOKIEBOT PRIMERO (igual que BS)
-        try {
-            await page.waitForSelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll', { timeout: 3000 });
-            await page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-            log('🍪', 'Cookiebot cerrado');
-            await sleep(500);
-        } catch (e) {
-            await page.evaluate(() => {
-                const btn = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-                if (btn) btn.click();
-            });
-        }
+        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
+        await sleep(2000);
+        await cerrarPopups();
         
         const currentUrl = page.url();
         if (!currentUrl.includes('/sso/login')) {
@@ -177,43 +165,29 @@ async function hacerLogin() {
             return true;
         }
         
-        log('📧', 'Llenando formulario...');
+        const emailTab = await page.$('input[type="radio"][value="email"]');
+        if (emailTab) { await emailTab.click(); await sleep(300); }
+        
         await page.waitForSelector('#login_email', { timeout: 10000 });
+        await page.click('#login_email', { clickCount: 3 });
+        await page.type('#login_email', CONFIG.EMAIL, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        // LOGIN CON EVALUATE (igual que BS que funciona en Railway)
-        const loginResult = await page.evaluate((email, password) => {
-            const emailRadio = document.querySelector('input[value="email"]');
-            if (emailRadio) emailRadio.click();
-            
-            const emailInput = document.querySelector('#login_email');
-            const passInput = document.querySelector('#login_pass');
-            if (!emailInput || !passInput) return { error: 'Campos no encontrados' };
-            
-            emailInput.value = email;
-            passInput.value = password;
-            emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-            passInput.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            const submitBtn = document.querySelector('#login_btw input[type="submit"]');
-            if (submitBtn) { submitBtn.click(); return { success: true }; }
-            return { error: 'Botón no encontrado' };
-        }, CONFIG.EMAIL, CONFIG.PASSWORD);
+        await page.click('#login_pass', { clickCount: 3 });
+        await page.type('#login_pass', CONFIG.PASSWORD, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        if (loginResult.error) {
-            log('❌', loginResult.error);
-            return false;
-        }
+        await page.evaluate(() => {
+            const btn = document.querySelector('#login_btw input[type="submit"]');
+            if (btn) btn.click();
+        });
         
-        log('🚀', 'Login enviado, esperando...');
-        await sleep(4000);
+        await sleep(5000);
         
-        // Verificar navegando a ML
-        await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        await sleep(1500);
-        
-        const logueado = await verificarSesion();
-        if (logueado) {
+        const newUrl = page.url();
+        if (!newUrl.includes('/sso/login')) {
             log('✅', 'Login exitoso!');
+            sesionActiva = true;
             await guardarCookies();
             return true;
         }
@@ -369,58 +343,13 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
             if (buyBtn) buyBtn.click();
         });
         
-        await sleep(3000);
-        
-        // FALLBACK: Si el click no navegó (pasa en Railway), hacer POST manual
-        if (page.url().includes('mobile-legends-diamonds-top-up')) {
-            log('⚠️', 'Click no navegó, haciendo POST manual...');
-            
-            const formData = await page.evaluate(() => {
-                const btn = document.querySelector('#ua-buyNowButton');
-                const form = btn ? btn.closest('form') : null;
-                if (!form) return null;
-                
-                const data = {};
-                form.querySelectorAll('input').forEach(input => {
-                    if (input.name && input.type !== 'submit') {
-                        if (input.type === 'radio') {
-                            if (input.checked) data[input.name] = input.value;
-                        } else {
-                            data[input.name] = input.value;
-                        }
-                    }
-                });
-                return { action: form.action, data };
-            });
-            
-            if (formData && formData.action) {
-                await page.evaluate((action, data) => {
-                    const form = document.createElement('form');
-                    form.method = 'POST';
-                    form.action = action;
-                    for (const [key, value] of Object.entries(data)) {
-                        const input = document.createElement('input');
-                        input.type = 'hidden';
-                        input.name = key;
-                        input.value = value;
-                        form.appendChild(input);
-                    }
-                    document.body.appendChild(form);
-                    form.submit();
-                }, formData.action, formData.data);
-                
-                await sleep(5000);
-            }
-        } else {
-            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
-            await sleep(2000);
-        }
-        
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+        await sleep(2000);
         await cerrarPopups();
         
         // Verificar checkout
         const currentUrl = page.url();
-        if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart') && !currentUrl.includes('directtopup') && !currentUrl.includes('game_topup_buy')) {
+        if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
             return { success: false, error: 'No se pudo llegar al checkout' };
         }
         log('✅', 'En página de checkout');
@@ -428,15 +357,8 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // ========== PASO 6: Click en "Pagar Ahora" ==========
         log('6️⃣', 'Haciendo click en Pagar Ahora...');
         
-        // Debug: ver qué botones hay
-        const botonesDisponibles = await page.evaluate(() => {
-            const btns = document.querySelectorAll('button, input[type="submit"], a.btn, .btn, .payNowButton');
-            return Array.from(btns).map(b => b.textContent?.trim() || b.value || b.className).slice(0, 5);
-        });
-        log('🔍', `Botones: ${JSON.stringify(botonesDisponibles)}`);
-        
         await page.evaluate(() => {
-            const payBtn = document.querySelector('a.payNowButton, .payNowButton, #ua-checkoutOrderButton, input[type="submit"][value*="Pagar"], input[type="submit"][value*="Pay"]');
+            const payBtn = document.querySelector('a.payNowButton, .payNowButton, #ua-checkoutOrderButton, input[type="submit"][value*="Pagar"]');
             if (payBtn) payBtn.click();
         });
         
@@ -446,8 +368,7 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // Verificar página de pago
         const payUrl = page.url();
-        log('🔗', `URL de pago: ${payUrl}`);
-        if (!payUrl.includes('pay.seagm.com') && !payUrl.includes('directtopup')) {
+        if (!payUrl.includes('pay.seagm.com')) {
             return { success: false, error: 'No se pudo llegar a la página de pago' };
         }
         log('✅', 'En página de selección de pago');
