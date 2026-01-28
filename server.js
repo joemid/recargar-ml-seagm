@@ -88,18 +88,26 @@ async function cargarCookies() {
 async function cerrarPopups() {
     if (!page) return;
     try {
-        const cerrado = await page.evaluate(() => {
+        await page.evaluate(() => {
+            // Cookiebot
             const allowAll = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
             if (allowAll && allowAll.offsetParent !== null) {
                 allowAll.click();
-                return 'cookiebot';
             }
-            return null;
+            // Cerrar cualquier overlay/modal
+            const overlays = document.querySelectorAll('.overlay, .modal, [class*="popup"], [class*="overlay"]');
+            overlays.forEach(o => {
+                if (o.style.display !== 'none') {
+                    o.style.display = 'none';
+                }
+            });
+            // Cerrar botones de cerrar
+            const closeButtons = document.querySelectorAll('[class*="close"], .close-btn, .btn-close');
+            closeButtons.forEach(btn => {
+                if (btn.offsetParent !== null) btn.click();
+            });
         });
-        if (cerrado) {
-            log('🍪', `Popup cerrado: ${cerrado}`);
-            await sleep(300);
-        }
+        await sleep(300);
     } catch (e) {}
 }
 
@@ -278,26 +286,48 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         }
         await sleep(CONFIG.DELAY_MEDIO);
         
-        // ========== DIFERENCIA CON BS: DOS CAMPOS ==========
-        log('3️⃣', 'Ingresando User ID...');
+        // ========== CAMPOS ==========
+        log('3️⃣', 'Ingresando User ID y Zone ID...');
         
-        // Click en campo User ID y escribir con keyboard
-        await page.click('input[name="userName"]');
-        await page.keyboard.type(userId, { delay: 50 });
-        log('✅', `User ID escrito: ${userId}`);
+        // DEBUG: Ver qué inputs hay
+        const inputsDebug = await page.evaluate(() => {
+            const inputs = document.querySelectorAll('input[type="text"], input[type="number"]');
+            return Array.from(inputs).map(i => ({ name: i.name, placeholder: i.placeholder, id: i.id }));
+        });
+        log('🔍', `Inputs disponibles: ${JSON.stringify(inputsDebug)}`);
         
-        // Tab para ir al siguiente campo
-        await page.keyboard.press('Tab');
-        await sleep(500);
+        const fillResult = await page.evaluate((userId, zoneId) => {
+            // Intentar múltiples selectores
+            const userInput = document.querySelector('input[name="userName"]') || 
+                              document.querySelector('input[name="input1"]') ||
+                              document.querySelector('input[placeholder*="User ID"]');
+            const zoneInput = document.querySelector('input[name="serverId"]') || 
+                              document.querySelector('input[name="input2"]') ||
+                              document.querySelector('input[placeholder*="Zone ID"]');
+            
+            if (!userInput || !zoneInput) {
+                return { error: 'Campos no encontrados', user: !!userInput, zone: !!zoneInput };
+            }
+            
+            // Igual que login: .value + dispatchEvent
+            userInput.value = userId;
+            userInput.dispatchEvent(new Event('input', { bubbles: true }));
+            userInput.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            zoneInput.value = zoneId;
+            zoneInput.dispatchEvent(new Event('input', { bubbles: true }));
+            zoneInput.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            return { success: true, user: userInput.value, zone: zoneInput.value };
+        }, userId, zoneId);
         
-        log('4️⃣', 'Ingresando Zone ID...');
-        await page.keyboard.type(zoneId, { delay: 50 });
-        log('✅', `Zone ID escrito: ${zoneId}`);
-        
-        // Tab para salir del campo (trigger validación)
-        await page.keyboard.press('Tab');
-        await sleep(1500);
-        // ========== FIN DIFERENCIA ==========
+        if (fillResult.error) {
+            log('❌', fillResult.error);
+            return { success: false, error: fillResult.error };
+        }
+        log('✅', `Campos llenados: User=${fillResult.user} Zone=${fillResult.zone}`);
+        await sleep(CONFIG.DELAY_MEDIO);
+        // ========== FIN CAMPOS ==========
         
         if (!hacerCompra || CONFIG.MODO_TEST) {
             const elapsed = Date.now() - start;
@@ -317,9 +347,22 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         log('5️⃣', 'Haciendo click en Comprar ahora...');
         
-        // Click directo en el botón submit
-        await page.click('input#ua-buyNowButton');
-        log('👆', 'Click ejecutado');
+        // Cerrar cualquier popup/overlay primero
+        await cerrarPopups();
+        await sleep(500);
+        
+        // Scroll al botón
+        await page.evaluate(() => {
+            const btn = document.querySelector('#ua-buyNowButton');
+            if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        await sleep(500);
+        
+        // Click con evaluate (funciona en Railway)
+        await page.evaluate(() => {
+            const buyBtn = document.querySelector('#ua-buyNowButton');
+            if (buyBtn) buyBtn.click();
+        });
         
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
         await sleep(2000);
