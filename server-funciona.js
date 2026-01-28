@@ -151,108 +151,51 @@ async function verificarSesion() {
 
 async function hacerLogin() {
     if (!page) return false;
-    
     try {
         log('🔐', 'Iniciando login en SEAGM...');
+        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUT });
+        await sleep(2000);
+        await cerrarPopups();
         
-        // Ir a página de login
-        await page.goto(CONFIG.URL_LOGIN, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        
-        // ========== CERRAR COOKIEBOT RÁPIDO ==========
-        try {
-            await page.waitForSelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll', { timeout: 5000 });
-            await page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-            log('🍪', 'Cookiebot cerrado');
-            await sleep(500);
-        } catch (e) {
-            await page.evaluate(() => {
-                const btn = document.querySelector('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll');
-                if (btn) btn.click();
-            });
-        }
-        
-        // Verificar si ya está logueado
-        if (!page.url().includes('/sso/login')) {
+        const currentUrl = page.url();
+        if (!currentUrl.includes('/sso/login')) {
             log('✅', 'Ya estaba logueado');
             sesionActiva = true;
             await guardarCookies();
             return true;
         }
         
-        // ========== LLENAR Y ENVIAR FORMULARIO ==========
-        log('📧', 'Llenando formulario...');
+        const emailTab = await page.$('input[type="radio"][value="email"]');
+        if (emailTab) { await emailTab.click(); await sleep(300); }
         
         await page.waitForSelector('#login_email', { timeout: 10000 });
+        await page.click('#login_email', { clickCount: 3 });
+        await page.type('#login_email', CONFIG.EMAIL, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        const loginResult = await page.evaluate((email, password) => {
-            const emailRadio = document.querySelector('input[value="email"]');
-            if (emailRadio) emailRadio.click();
-            
-            const emailInput = document.querySelector('#login_email');
-            const passInput = document.querySelector('#login_pass');
-            if (!emailInput || !passInput) return { error: 'Campos no encontrados' };
-            
-            emailInput.value = email;
-            passInput.value = password;
-            emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-            passInput.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            const submitBtn = document.querySelector('#login_btw input[type="submit"]');
-            if (submitBtn) {
-                submitBtn.click();
-                return { success: true, method: 'submit-btn' };
-            }
-            
-            const form = document.querySelector('#sso_form');
-            if (form) {
-                form.submit();
-                return { success: true, method: 'form-submit' };
-            }
-            
-            return { error: 'No se pudo enviar' };
-        }, CONFIG.EMAIL, CONFIG.PASSWORD);
+        await page.click('#login_pass', { clickCount: 3 });
+        await page.type('#login_pass', CONFIG.PASSWORD, { delay: 30 });
+        await sleep(CONFIG.DELAY_RAPIDO);
         
-        if (loginResult.error) {
-            log('❌', loginResult.error);
-            return false;
-        }
-        
-        log('🚀', `Login enviado (${loginResult.method})`);
-        
-        await sleep(4000);
-        
-        const error = await page.evaluate(() => {
-            const alert = document.querySelector('#email_login_alert');
-            return alert?.textContent?.trim() || null;
+        await page.evaluate(() => {
+            const btn = document.querySelector('#login_btw input[type="submit"]');
+            if (btn) btn.click();
         });
         
-        if (error) {
-            log('❌', `Error: ${error}`);
-            return false;
-        }
+        await sleep(5000);
         
-        if (!page.url().includes('/sso/login')) {
+        const newUrl = page.url();
+        if (!newUrl.includes('/sso/login')) {
             log('✅', 'Login exitoso!');
             sesionActiva = true;
             await guardarCookies();
             return true;
         }
         
-        await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-        await sleep(1500);
-        
-        const logueado = await verificarSesion();
-        if (logueado) {
-            log('✅', 'Login verificado!');
-            return true;
-        }
-        
         log('❌', 'Login falló');
         return false;
-        
     } catch (e) {
-        log('❌', `Error: ${e.message}`);
-        try { await page.screenshot({ path: './error_login.png' }); } catch {}
+        log('❌', `Error en login: ${e.message}`);
         return false;
     }
 }
@@ -294,14 +237,7 @@ async function initBrowser() {
         await guardarCookies();
     } else {
         const loginOk = await hacerLogin();
-        if (loginOk) {
-            log('✅', 'Login automático exitoso');
-            // Navegar a Mobile Legends después del login
-            log('🌐', 'Navegando a Mobile Legends...');
-            await page.goto(CONFIG.URL_MOBILE_LEGENDS, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUT });
-            await sleep(1500);
-            await cerrarPopups();
-        } else {
+        if (!loginOk) {
             log('⚠️', '═'.repeat(45));
             log('⚠️', 'NO SE PUDO INICIAR SESIÓN');
             log('⚠️', 'Usa POST /cargar-cookies para subir cookies');
