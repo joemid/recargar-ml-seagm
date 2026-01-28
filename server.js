@@ -288,6 +288,13 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await userInput.type(userId, { delay: 30 });
         await sleep(CONFIG.DELAY_MEDIO);
         
+        // VERIFICAR VALOR
+        const userValue = await page.evaluate(() => {
+            const input = document.querySelector('input[name="userName"]') || document.querySelector('input[name="input1"]');
+            return input ? input.value : 'NO ENCONTRADO';
+        });
+        log('✏️', `User ID valor: "${userValue}"`);
+        
         log('4️⃣', 'Ingresando Zone ID...');
         const zoneInput = await page.$('input[name="serverId"]') || await page.$('input[name="input2"]');
         if (!zoneInput) {
@@ -296,6 +303,13 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await zoneInput.click({ clickCount: 3 });
         await zoneInput.type(zoneId, { delay: 30 });
         await sleep(CONFIG.DELAY_MEDIO);
+        
+        // VERIFICAR VALOR
+        const zoneValue = await page.evaluate(() => {
+            const input = document.querySelector('input[name="serverId"]') || document.querySelector('input[name="input2"]');
+            return input ? input.value : 'NO ENCONTRADO';
+        });
+        log('✏️', `Zone ID valor: "${zoneValue}"`);
         // ========== FIN DIFERENCIA ==========
         
         if (!hacerCompra || CONFIG.MODO_TEST) {
@@ -315,13 +329,51 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         }
         
         log('5️⃣', 'Haciendo click en Comprar ahora...');
-        await page.evaluate(() => {
-            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
-            if (buyBtn) buyBtn.click();
-        });
         
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+        // URL ANTES
+        const urlAntes = page.url();
+        log('🔗', `URL ANTES: ${urlAntes}`);
+        
+        // VERIFICAR BOTÓN
+        const botonInfo = await page.evaluate(() => {
+            const btn = document.querySelector('#ua-buyNowButton');
+            const btn2 = document.querySelector('#buyNowButton input[type="submit"]');
+            const form = document.querySelector('form[name="topup_data"]');
+            
+            return {
+                btn_ua: btn ? { existe: true, disabled: btn.disabled, visible: btn.offsetParent !== null } : { existe: false },
+                btn_input: btn2 ? { existe: true, disabled: btn2.disabled, visible: btn2.offsetParent !== null } : { existe: false },
+                form: form ? { existe: true, action: form.action } : { existe: false }
+            };
+        });
+        log('🔍', `BOTÓN INFO: ${JSON.stringify(botonInfo)}`);
+        
+        // HACER CLICK
+        const clickResult = await page.evaluate(() => {
+            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
+            if (buyBtn) {
+                buyBtn.click();
+                return { clicked: true, tagName: buyBtn.tagName, id: buyBtn.id };
+            }
+            return { clicked: false };
+        });
+        log('👆', `CLICK RESULT: ${JSON.stringify(clickResult)}`);
+        
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch((e) => {
+            log('⚠️', `waitForNavigation timeout: ${e.message}`);
+        });
         await sleep(2000);
+        
+        // URL DESPUÉS
+        const urlDespues = page.url();
+        log('🔗', `URL DESPUÉS: ${urlDespues}`);
+        log('🔄', `¿Cambió URL? ${urlAntes !== urlDespues ? 'SÍ' : 'NO'}`);
+        
+        // HTML del body si no cambió
+        if (urlAntes === urlDespues) {
+            const bodyText = await page.evaluate(() => document.body.innerText.substring(0, 500));
+            log('📄', `Body: ${bodyText.replace(/\n/g, ' ').substring(0, 200)}`);
+        }
         
         const currentUrl = page.url();
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
