@@ -279,47 +279,45 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await sleep(CONFIG.DELAY_MEDIO);
         
         // ========== DIFERENCIA CON BS: DOS CAMPOS ==========
-        log('3️⃣', 'Ingresando User ID...');
-        const userInput = await page.$('input[name="userName"]') || await page.$('input[name="input1"]');
-        if (!userInput) {
-            return { success: false, error: 'No se encontró el campo de User ID' };
+        log('3️⃣', 'Ingresando User ID y Zone ID...');
+        
+        // LLENAR CON EVALUATE (igual que login que SÍ funciona)
+        const camposResult = await page.evaluate((userId, zoneId) => {
+            const userInput = document.querySelector('input[name="userName"]') || document.querySelector('input[name="input1"]');
+            const zoneInput = document.querySelector('input[name="serverId"]') || document.querySelector('input[name="input2"]');
+            
+            if (!userInput) return { error: 'No se encontró campo User ID' };
+            if (!zoneInput) return { error: 'No se encontró campo Zone ID' };
+            
+            // Limpiar y llenar User ID
+            userInput.focus();
+            userInput.value = '';
+            userInput.value = userId;
+            userInput.dispatchEvent(new Event('input', { bubbles: true }));
+            userInput.dispatchEvent(new Event('change', { bubbles: true }));
+            userInput.dispatchEvent(new Event('blur', { bubbles: true }));
+            
+            // Limpiar y llenar Zone ID  
+            zoneInput.focus();
+            zoneInput.value = '';
+            zoneInput.value = zoneId;
+            zoneInput.dispatchEvent(new Event('input', { bubbles: true }));
+            zoneInput.dispatchEvent(new Event('change', { bubbles: true }));
+            zoneInput.dispatchEvent(new Event('blur', { bubbles: true }));
+            
+            return { 
+                success: true, 
+                userValue: userInput.value, 
+                zoneValue: zoneInput.value 
+            };
+        }, userId, zoneId);
+        
+        if (camposResult.error) {
+            return { success: false, error: camposResult.error };
         }
-        await userInput.click({ clickCount: 3 });
-        await userInput.type(userId, { delay: 30 });
-        await sleep(CONFIG.DELAY_MEDIO);
+        log('✅', `Campos: User="${camposResult.userValue}" Zone="${camposResult.zoneValue}"`);
         
-        // VERIFICAR VALOR
-        const userValue = await page.evaluate(() => {
-            const input = document.querySelector('input[name="userName"]') || document.querySelector('input[name="input1"]');
-            return input ? input.value : 'NO ENCONTRADO';
-        });
-        log('✏️', `User ID valor: "${userValue}"`);
-        
-        log('4️⃣', 'Ingresando Zone ID...');
-        const zoneInput = await page.$('input[name="serverId"]') || await page.$('input[name="input2"]');
-        if (!zoneInput) {
-            return { success: false, error: 'No se encontró el campo de Zone ID' };
-        }
-        await zoneInput.click({ clickCount: 3 });
-        await zoneInput.type(zoneId, { delay: 30 });
-        await sleep(CONFIG.DELAY_MEDIO);
-        
-        // VERIFICAR VALOR
-        const zoneValue = await page.evaluate(() => {
-            const input = document.querySelector('input[name="serverId"]') || document.querySelector('input[name="input2"]');
-            return input ? input.value : 'NO ENCONTRADO';
-        });
-        log('✏️', `Zone ID valor: "${zoneValue}"`);
-        
-        // VERIFICAR SI HAY ERRORES DE VALIDACIÓN DESPUÉS DE LLENAR
-        await sleep(1000);
-        const erroresValidacion = await page.evaluate(() => {
-            const errors = document.querySelectorAll('.error, .alert, [class*="error"], [class*="invalid"]');
-            return Array.from(errors).map(e => e.textContent.trim()).filter(t => t.length > 0 && t.length < 200);
-        });
-        if (erroresValidacion.length > 0) {
-            log('⚠️', `Errores de validación: ${JSON.stringify(erroresValidacion)}`);
-        }
+        await sleep(1500);
         // ========== FIN DIFERENCIA ==========
         
         if (!hacerCompra || CONFIG.MODO_TEST) {
@@ -344,63 +342,19 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         const urlAntes = page.url();
         log('🔗', `URL ANTES: ${urlAntes}`);
         
-        // VERIFICAR BOTÓN
-        const botonInfo = await page.evaluate(() => {
+        // CLICK CON EVALUATE (igual que BS)
+        await page.evaluate(() => {
             const btn = document.querySelector('#ua-buyNowButton');
-            const form = document.querySelector('form');
-            const allForms = document.querySelectorAll('form');
-            // Verificar si hay errores de validación visibles
-            const errors = document.querySelectorAll('.error, .alert-danger, [class*="error"]');
-            const errorTexts = Array.from(errors).map(e => e.textContent.trim()).filter(t => t.length > 0);
-            
-            return {
-                btn: btn ? { existe: true, disabled: btn.disabled, visible: btn.offsetParent !== null } : { existe: false },
-                form: form ? { existe: true, name: form.name, action: form.action } : { existe: false },
-                totalForms: allForms.length,
-                errores: errorTexts
-            };
+            if (btn) btn.click();
         });
-        log('🔍', `BOTÓN INFO: ${JSON.stringify(botonInfo)}`);
+        log('👆', 'Click ejecutado');
         
-        // USAR PAGE.CLICK DE PUPPETEER (no evaluate)
-        try {
-            await page.waitForSelector('#ua-buyNowButton', { timeout: 5000 });
-            await page.click('#ua-buyNowButton');
-            log('👆', 'Click con page.click()');
-        } catch (e) {
-            log('⚠️', `Error en click: ${e.message}`);
-        }
-        
-        // Esperar un poco para ver si navega
-        await sleep(3000);
-        
-        // Si no navegó, intentar submit del form
-        let urlCheck = page.url();
-        if (urlCheck.includes('mobile-legends-diamonds-top-up')) {
-            log('🔄', 'No navegó, intentando form.submit()...');
-            await page.evaluate(() => {
-                const forms = document.querySelectorAll('form');
-                for (const form of forms) {
-                    if (form.querySelector('#ua-buyNowButton') || form.querySelector('input[name="userName"]')) {
-                        form.submit();
-                        return;
-                    }
-                }
-                // Si no encontró form con el botón, buscar cualquier form de topup
-                const topupForm = document.querySelector('form');
-                if (topupForm) topupForm.submit();
-            });
-            await sleep(3000);
-        }
-        
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch((e) => {
-            log('⚠️', `waitForNavigation: ${e.message}`);
-        });
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+        await sleep(2000);
         
         // URL DESPUÉS
         const urlDespues = page.url();
         log('🔗', `URL DESPUÉS: ${urlDespues}`);
-        log('🔄', `¿Cambió URL? ${urlAntes !== urlDespues ? 'SÍ' : 'NO'}`);
         
         const currentUrl = page.url();
         if (!currentUrl.includes('order_checkout') && !currentUrl.includes('cart')) {
