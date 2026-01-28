@@ -570,7 +570,7 @@ app.get('/', (req, res) => {
     res.json({ 
         status: 'ok',
         servicio: 'RECARGAR-ML-SEAGM',
-        version: '1.0.0',
+        version: "1.0.2",
         plataforma: 'SEAGM',
         sesion_activa: sesionActiva,
         en_cola: cola.length,
