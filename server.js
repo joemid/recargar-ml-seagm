@@ -399,6 +399,28 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await cerrarPopups();
         await sleep(500);
         
+        // Scroll al botón para asegurar visibilidad
+        await page.evaluate(() => {
+            const btn = document.querySelector('#buyNowButton');
+            if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        await sleep(500);
+        
+        // Verificar si hay errores de validación visibles
+        const errores = await page.evaluate(() => {
+            const alerts = document.querySelectorAll('.alert, .error, .warning, [class*="error"]');
+            const textos = [];
+            alerts.forEach(a => {
+                if (a.offsetParent !== null && a.textContent.trim()) {
+                    textos.push(a.textContent.trim());
+                }
+            });
+            return textos;
+        });
+        if (errores.length > 0) {
+            log('⚠️', `Errores visibles: ${errores.join(', ')}`);
+        }
+        
         // Verificar que el botón existe
         const btnExists = await page.evaluate(() => {
             const btn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
@@ -409,10 +431,24 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         // Screenshot de diagnóstico
         try { await page.screenshot({ path: './antes_comprar.png' }); } catch {}
         
-        await page.evaluate(() => {
-            const buyBtn = document.querySelector('#buyNowButton input[type="submit"], #ua-buyNowButton');
-            if (buyBtn) buyBtn.click();
-        });
+        // Método 1: Click directo con Puppeteer (más confiable)
+        try {
+            const buyBtn = await page.$('#ua-buyNowButton');
+            if (buyBtn) {
+                await buyBtn.click();
+                log('✅', 'Click via Puppeteer');
+            } else {
+                // Método 2: Evaluar en página
+                await page.evaluate(() => {
+                    const btn = document.querySelector('#ua-buyNowButton') || 
+                                document.querySelector('#buyNowButton input[type="submit"]');
+                    if (btn) btn.click();
+                });
+                log('✅', 'Click via evaluate');
+            }
+        } catch (e) {
+            log('⚠️', `Error en click: ${e.message}`);
+        }
         
         log('⏳', 'Esperando navegación al checkout...');
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {
