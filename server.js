@@ -361,7 +361,8 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         
         // ========== ML TIENE 2 CAMPOS: User ID + Zone ID ==========
         log('3️⃣', 'Ingresando User ID...');
-        const userIdInput = await page.$('input[name="input1"]');
+        await page.waitForSelector('input[name="input1"], input[placeholder*="User ID"], input[placeholder*="user ID"]', { timeout: 10000 });
+        const userIdInput = await page.$('input[name="input1"]') || await page.$('input[placeholder*="User ID"]');
         if (!userIdInput) {
             return { success: false, error: 'No se encontró el campo de User ID' };
         }
@@ -370,7 +371,8 @@ async function ejecutarRecarga(userId, zoneId, diamonds, hacerCompra = true) {
         await sleep(CONFIG.DELAY_MEDIO);
         
         log('4️⃣', 'Ingresando Zone ID...');
-        const zoneIdInput = await page.$('input[name="input2"]');
+        await page.waitForSelector('input[name="input2"], input[placeholder*="Zone ID"], input[placeholder*="zone ID"]', { timeout: 10000 });
+        const zoneIdInput = await page.$('input[name="input2"]') || await page.$('input[placeholder*="Zone ID"]');
         if (!zoneIdInput) {
             return { success: false, error: 'No se encontró el campo de Zone ID' };
         }
